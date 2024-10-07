@@ -5,7 +5,7 @@ from threading import Thread
 
 __all__ = [
     'Alias', 'Target', 'GdbServer', 'RR', 'Qemu', 'Docker', 'Tmux', 'Display',
-    'Proxy', 'Context',
+    'Context', 'Net',
     'p8', 'p16', 'p32', 'p64', 'pf', 'pd',
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
     'block',
@@ -252,7 +252,9 @@ class Qemu(Gdb):
         self.file = self.file if self.file else self.executable
 
     def __qemu(self, env: dict[str, str], aslr: bool, debug: bool) -> list[str]:
-        assert (not aslr)
+        if aslr:
+            raise ValueError
+
         qemu_set_env = [f'{k}={v}' for (k, v) in env.items()]
         qemu_set_env = ','.join(qemu_set_env)
         env = {}
@@ -606,14 +608,7 @@ class SocketTube(Tube):
         return self.__sendsk.send(data)
 
     def recv(self) -> bytes:
-        from contextlib import suppress
-
-        data = b''
-
-        with suppress(TimeoutError):
-            data = self.__recvsk.recv(self.RECVSZ)
-
-        return data
+        return self.__recvsk.recv(self.RECVSZ)
 
     def close(self):
         self.__sendsk.close()
@@ -683,9 +678,12 @@ class Proxy(Thread):
         self.start()
 
     def run(self):
+        from contextlib import suppress
+
         while not self.__event.is_set():
-            if data := self.__tube.recv():
-                self.__queue.put(data)
+            with suppress(TimeoutError):
+                if data := self.__tube.recv():
+                    self.__queue.put(data)
 
     def stop(self):
         self.__event.set()
@@ -716,10 +714,10 @@ class Proxy(Thread):
 
         if timeout and not self.__buffer:
             try:
-                timeout_ = timeout if timeout > 0 else None
-                self.__buffer = self.__queue.get(block=True, timeout=timeout_)
-            except Empty:
-                raise TimeoutError('recv timed out')
+                timeout = timeout if timeout > 0 else None  # type:ignore
+                self.__buffer = self.__queue.get(block=True, timeout=timeout)
+            except Empty as e:
+                raise TimeoutError from e
 
         size = size if size >= 0 else len(self.__buffer)
         data, self.__buffer = self.__buffer[:size], self.__buffer[size:]
@@ -780,7 +778,7 @@ class Proxy(Thread):
     def interactive(self):
         from contextlib import suppress
 
-        with suppress(KeyboardInterrupt):
+        with suppress(KeyboardInterrupt, BrokenPipeError):
             while True:
                 data = input().encode()
                 self.sendline(data)
@@ -792,11 +790,10 @@ class Context:
 
     type Attach = Callable[[], None]
     type Connect = Callable[[], Tube]
-    VERBOSE: int = 1
 
     @classmethod
-    def __create(cls, start: Callable[[ExitStack, Launcher, socket | None], int], attachable: bool,
-                 command: Command, connect: Connect | None, verbose: int) -> Self:
+    def __local(cls, start: Callable[[ExitStack, Launcher, socket | None], int], attachable: bool,
+                command: Command, connect: Connect | None, verbose: int) -> Self:
         from contextlib import ExitStack
         from socket import socketpair
 
@@ -826,29 +823,25 @@ class Context:
 
                 tube = SocketTube(sk)
 
-            tube = Logger(tube, verbose)
-            proxy = Proxy(tube)
-            stack.enter_context(proxy)
-            pid = launcher.getpid(pid)
+            if attachable:
+                pid = launcher.getpid(pid)
 
-            def attach(pid: int = pid):
-                popen = launcher.attach(pid)
-                stack.enter_context(popen)
-                pclose = Pclose(popen)
-                stack.enter_context(pclose)
+                def attach(pid: int = pid):
+                    popen = launcher.attach(pid)
+                    stack.enter_context(popen)
+                    pclose = Pclose(popen)
+                    stack.enter_context(pclose)
+            else:
+                attach = None  # type:ignore
 
-            def dummy(pid: int = pid):
-                pass
-
-            attach = attach if attachable else dummy
-            return cls(proxy, attach, stack)
+            return cls(tube, verbose, attach, stack)
         except:
             stack.close()
             raise
 
     @classmethod
     def run(cls, command: Command, *, env: dict[str, str] = {}, aslr: bool = True,
-            connect: Connect | None = None, verbose: int = VERBOSE) -> Self:
+            connect: Connect | None = None, verbose: int = 1) -> Self:
         from contextlib import ExitStack
         from socket import socket
 
@@ -859,11 +852,13 @@ class Context:
             stack.enter_context(pclose)
             return popen.pid
 
-        return cls.__create(start, True, command, connect, verbose)
+        attachable = command.lookup(GdbServer) and command.lookup(Tmux)
+        attachable = bool(attachable)
+        return cls.__local(start, attachable, command, connect, verbose)
 
     @classmethod
     def debug(cls, command: Command, *, env: dict[str, str] = {}, aslr: bool = True,
-              connect: Connect | None = None, verbose: int = VERBOSE) -> Self:
+              connect: Connect | None = None, verbose: int = 1) -> Self:
         from contextlib import ExitStack
         from socket import socket
 
@@ -876,7 +871,7 @@ class Context:
                 stack.enter_context(pclose)
                 return popen.pid
 
-        elif command.lookup(Gdb):
+        elif command.lookup(Gdb) and command.lookup(Tmux):
             def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
                 popen = launcher.debug(env=env, aslr=aslr, redirect=redirect)
                 stack.enter_context(popen)
@@ -887,11 +882,24 @@ class Context:
         else:
             raise NotImplementedError
 
-        return cls.__create(start, False, command, connect, verbose)
+        return cls.__local(start, False, command, connect, verbose)
 
-    def __init__(self, proxy: Proxy, attach: Attach, stack: ExitStack):
+    @classmethod
+    def remote(cls, connect: Connect, *, verbose: int = 1) -> Self:
+        tube = connect()
+        return cls(tube, verbose, None, None)
+
+    def __init__(self, tube: Tube, verbose: int, attach: Attach | None, stack: ExitStack | None):
         from contextlib import ExitStack
 
+        def dummy(*args, **kwargs):
+            pass
+
+        tube = Logger(tube, verbose)
+        attach = attach if attach else dummy
+        stack = stack if stack else ExitStack()
+        proxy = Proxy(tube)
+        stack.enter_context(proxy)
         self.proxy: Proxy = proxy
         self.attach: Context.Attach = attach
         self.__stack: ExitStack = stack
@@ -904,6 +912,50 @@ class Context:
 
     def __exit__(self, *args):
         self.__stack.__exit__(*args)
+
+
+class Net:
+    from ssl import SSLContext
+
+    INTERVAL: float = 0.1
+
+    @classmethod
+    def tcp(cls, host: str, port: int, *, ssl: SSLContext | None = None) -> Tube:
+        from contextlib import suppress
+        from socket import socket
+        from time import sleep
+
+        sk = socket()
+
+        try:
+            if ssl:
+                sk = ssl.wrap_socket(sk)
+
+            while True:
+                with suppress(ConnectionRefusedError):
+                    sk.connect((host, port))
+                    break
+
+                sleep(cls.INTERVAL)
+
+            return SocketTube(sk)
+        except:
+            sk.close()
+            raise
+
+    @staticmethod
+    def udp(host: str, port: int) -> Tube:
+        from socket import socket, AF_INET, SOCK_DGRAM
+
+        sk = socket(AF_INET, SOCK_DGRAM)
+
+        try:
+            sk.connect((host, port))
+        except:
+            sk.close()
+            raise
+
+        return SocketTube(sk)
 
 
 class Limit:
