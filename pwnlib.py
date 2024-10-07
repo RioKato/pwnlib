@@ -483,7 +483,7 @@ class Launcher:
         return self.executor.getpid(pid)
 
 
-class Killer:
+class Pclose:
     from subprocess import Popen
     TIMEOUT: float = 0.1
 
@@ -582,13 +582,49 @@ class Tube(metaclass=ABCMeta):
     def recv(self) -> bytes:
         pass
 
+    @abstractmethod
+    def close(self):
+        pass
+
+
+class SocketTube(Tube):
+    from socket import socket
+
+    INTERVAL: float = 0.1
+    RECVSZ: int = 0x1000
+
+    def __init__(self, sk: socket):
+        from socket import socket
+
+        sendsk, recvsk = sk, sk.dup()
+        sendsk.settimeout(None)
+        recvsk.settimeout(self.INTERVAL)
+        self.__sendsk: socket = sendsk
+        self.__recvsk: socket = recvsk
+
+    def send(self, data: bytes) -> int:
+        return self.__sendsk.send(data)
+
+    def recv(self) -> bytes:
+        from contextlib import suppress
+
+        data = b''
+
+        with suppress(TimeoutError):
+            data = self.__recvsk.recv(self.RECVSZ)
+
+        return data
+
+    def close(self):
+        self.__sendsk.close()
+        self.__recvsk.close()
+
 
 class Logger(Tube):
-    VERBOSE: int = 1
     SENDHDR: str = '  >'
     RECVHDR: str = '    <'
 
-    def __init__(self, tube: Tube, *, verbose: int = VERBOSE):
+    def __init__(self, tube: Tube, verbose: int):
         self.__tube: Tube = tube
         self.__verbose: int = verbose
 
@@ -596,8 +632,8 @@ class Logger(Tube):
     def __hexdump(data: bytes, header: str) -> str:
         text = ''
 
-        for l in Hexdump.lines(data):
-            text += f'{header} {l}\n'
+        for line in Hexdump.lines(data):
+            text += f'{header} {line}\n'
 
         if text:
             border = Hexdump.border('-')
@@ -630,37 +666,11 @@ class Logger(Tube):
         self.__print(data, self.RECVHDR)
         return data
 
+    def close(self):
+        self.__tube.close()
+
 
 class Proxy(Thread):
-    from socket import socket
-
-    RECVSZ: int = 0x1000
-    INTERVAL: float = 0.1
-
-    @classmethod
-    def create(cls, delegate: socket, *, verbose: int = Logger.VERBOSE) -> Self:
-        delegate.settimeout(cls.INTERVAL)
-
-        class SocketTube(Tube):
-            def send(self, data: bytes) -> int:
-                return delegate.send(data)
-
-            def recv(self) -> bytes:
-                from contextlib import suppress
-
-                data = b''
-
-                with suppress(TimeoutError):
-                    data = delegate.recv(cls.RECVSZ)
-
-                return data
-
-        tube = SocketTube()
-        tube = Logger(tube, verbose=verbose)
-        self = cls(tube)
-        self.start()
-        return self
-
     def __init__(self, tube: Tube):
         from threading import Event
         from queue import Queue
@@ -670,6 +680,7 @@ class Proxy(Thread):
         self.__event: Event = Event()
         self.__queue: Queue = Queue()
         self.__buffer: bytes = b''
+        self.start()
 
     def run(self):
         while not self.__event.is_set():
@@ -679,6 +690,7 @@ class Proxy(Thread):
     def stop(self):
         self.__event.set()
         self.join()
+        self.__tube.close()
 
     def __enter__(self) -> Self:
         return self
@@ -702,14 +714,11 @@ class Proxy(Thread):
             while not self.__queue.empty():
                 self.__buffer += self.__queue.get(block=False)
 
-        block = bool(timeout)
-        timeout_ = timeout if timeout > 0 else None
-
-        try:
-            if not self.__buffer:
-                self.__buffer = self.__queue.get(block=block, timeout=timeout_)
-        except Empty:
-            if block:
+        if timeout and not self.__buffer:
+            try:
+                timeout_ = timeout if timeout > 0 else None
+                self.__buffer = self.__queue.get(block=True, timeout=timeout_)
+            except Empty:
                 raise TimeoutError('recv timed out')
 
         size = size if size >= 0 else len(self.__buffer)
@@ -719,20 +728,43 @@ class Proxy(Thread):
     def __cancel(self, data: bytes):
         self.__buffer = data+self.__buffer
 
-    def recvuntil(self, delim: bytes, *, timeout: float = -1) -> bytes:
+    def recvcond(self, cond: Callable[[bytes], int], *, timeout: float = -1) -> bytes:
         data = b''
 
-        try:
-            while (pos := data.find(delim)) == -1:
+        while True:
+            try:
                 data += self.recv(timeout=timeout)
-        except:
-            self.__cancel(data)
-            raise
+            except:
+                self.__cancel(data)
+                raise
 
-        pos += len(delim)
-        data, rest = data[:pos], data[pos:]
-        self.__cancel(rest)
-        return data
+            if (pos := cond(data)) >= 0:
+                data, rest = data[:pos], data[pos:]
+                self.__cancel(rest)
+                return data
+
+            if not timeout:
+                self.__cancel(data)
+                return b''
+
+    def recvuntil(self, delim: bytes, *, timeout: float = -1) -> bytes:
+        def cond(data: bytes) -> int:
+            if (pos := data.find(delim)) != -1:
+                pos += len(delim)
+                return pos
+            else:
+                return -1
+
+        return self.recvcond(cond, timeout=timeout)
+
+    def recvexact(self, n: int, *, timeout: float = -1) -> bytes:
+        def cond(data: bytes) -> int:
+            if len(data) >= n:
+                return n
+            else:
+                return -1
+
+        return self.recvcond(cond, timeout=timeout)
 
     def recvline(self, *, timeout: float = -1) -> bytes:
         return self.recvuntil(b'\n', timeout=timeout)
@@ -744,20 +776,6 @@ class Proxy(Thread):
     def sendlineafter(self, delim: bytes, data: bytes, *, timeout: float = -1):
         self.recvuntil(delim, timeout=timeout)
         self.sendline(data)
-
-    def recvexact(self, n: int, *, timeout: float = -1) -> bytes:
-        data = b''
-
-        try:
-            while len(data) < n:
-                data += self.recv(timeout=timeout)
-        except:
-            self.__cancel(data)
-            raise
-
-        data, rest = data[:n], data[n:]
-        self.__cancel(rest)
-        return data
 
     def interactive(self):
         from contextlib import suppress
@@ -773,7 +791,8 @@ class Context:
     from socket import socket
 
     type Attach = Callable[[], None]
-    type Connect = Callable[[], socket]
+    type Connect = Callable[[], Tube]
+    VERBOSE: int = 1
 
     @classmethod
     def __create(cls, start: Callable[[ExitStack, Launcher, socket | None], int], attachable: bool,
@@ -792,29 +811,31 @@ class Context:
 
             if connect:
                 pid = start(stack, launcher, None)
-                delegate = connect()
+                tube = connect()
 
             else:
-                delegate, redirect = socketpair()
+                sk, redirect = socketpair()
 
                 try:
                     pid = start(stack, launcher, redirect)
                 except:
-                    delegate.close()
+                    sk.close()
                     raise
                 finally:
                     redirect.close()
 
-            stack.enter_context(delegate)
-            proxy = Proxy.create(delegate, verbose=verbose)
+                tube = SocketTube(sk)
+
+            tube = Logger(tube, verbose)
+            proxy = Proxy(tube)
             stack.enter_context(proxy)
             pid = launcher.getpid(pid)
 
             def attach(pid: int = pid):
                 popen = launcher.attach(pid)
                 stack.enter_context(popen)
-                killer = Killer(popen)
-                stack.enter_context(killer)
+                pclose = Pclose(popen)
+                stack.enter_context(pclose)
 
             def dummy(pid: int = pid):
                 pass
@@ -827,47 +848,44 @@ class Context:
 
     @classmethod
     def run(cls, command: Command, *, env: dict[str, str] = {}, aslr: bool = True,
-            connect: Connect | None = None, verbose: int = Logger.VERBOSE) -> Self:
+            connect: Connect | None = None, verbose: int = VERBOSE) -> Self:
         from contextlib import ExitStack
         from socket import socket
 
         def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
             popen = launcher.run(env=env, aslr=aslr, redirect=redirect)
             stack.enter_context(popen)
-            killer = Killer(popen)
-            stack.enter_context(killer)
+            pclose = Pclose(popen)
+            stack.enter_context(pclose)
             return popen.pid
 
         return cls.__create(start, True, command, connect, verbose)
 
     @classmethod
     def debug(cls, command: Command, *, env: dict[str, str] = {}, aslr: bool = True,
-              connect: Connect | None = None, verbose: int = Logger.VERBOSE) -> Self:
+              connect: Connect | None = None, verbose: int = VERBOSE) -> Self:
         from contextlib import ExitStack
         from socket import socket
 
-        def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
-            popen = launcher.debug(env=env, aslr=aslr, redirect=redirect)
-            stack.enter_context(popen)
-            killer = Killer(popen)
-            stack.enter_context(killer)
-            return popen.pid
+        if command.lookup(RR):
+            def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
+                stack.callback(launcher.replay)
+                popen = launcher.record(env=env, aslr=aslr, redirect=redirect)
+                stack.enter_context(popen)
+                pclose = Pclose(popen)
+                stack.enter_context(pclose)
+                return popen.pid
 
-        return cls.__create(start, False, command, connect, verbose)
+        elif command.lookup(Gdb):
+            def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
+                popen = launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                stack.enter_context(popen)
+                pclose = Pclose(popen)
+                stack.enter_context(pclose)
+                return popen.pid
 
-    @classmethod
-    def record(cls, command: Command, *, env: dict[str, str] = {}, aslr: bool = True,
-               connect: Connect | None = None, verbose: int = Logger.VERBOSE) -> Self:
-        from contextlib import ExitStack
-        from socket import socket
-
-        def start(stack: ExitStack, launcher: Launcher, redirect: socket | None) -> int:
-            stack.callback(launcher.replay)
-            popen = launcher.record(env=env, aslr=aslr, redirect=redirect)
-            stack.enter_context(popen)
-            killer = Killer(popen)
-            stack.enter_context(killer)
-            return popen.pid
+        else:
+            raise NotImplementedError
 
         return cls.__create(start, False, command, connect, verbose)
 
