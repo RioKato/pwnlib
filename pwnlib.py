@@ -521,7 +521,7 @@ class ProcessManager(AbstractContextManager):
         return self
 
     def __exit__(self, *args) -> bool | None:
-        if args[0] == self.ExitError:
+        if args[0] is self.ExitError:
             self.__context.__exit__(None, None, None)
             return True
         else:
