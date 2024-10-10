@@ -453,11 +453,10 @@ class Executor:
 
 
 @dataclass
-class Launcher(AbstractContextManager):
+class ProcessManager(AbstractContextManager):
     from subprocess import Popen
 
     executor: Executor
-    INTERVAL: ClassVar[float] = 0.1
 
     class ExitError(Exception):
         pass
@@ -481,7 +480,7 @@ class Launcher(AbstractContextManager):
                 popen.send_signal(signal)
 
                 with suppress(TimeoutExpired):
-                    popen.wait(self.INTERVAL)
+                    popen.wait(0.1)
                     return
 
         self.__context.enter_context(popen)
@@ -518,9 +517,6 @@ class Launcher(AbstractContextManager):
     def exit(self):
         raise self.ExitError
 
-    def close(self):
-        self.__context.close()
-
     def __enter__(self) -> Self:
         return self
 
@@ -530,6 +526,43 @@ class Launcher(AbstractContextManager):
             return True
         else:
             return self.__context.__exit__(*args)
+
+
+@dataclass
+class Launcher(AbstractContextManager):
+    manager: ProcessManager
+
+    def __init__(self, command: Command):
+        self.manager = ProcessManager(command)
+
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
+        return self.manager.run(env=env, aslr=aslr, redirect=redirect)
+
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
+        self.manager.debug(env=env, aslr=aslr, redirect=redirect)
+        self.manager.view()
+
+    def attach(self, pid: int):
+        self.manager.attach(pid)
+        self.manager.view()
+
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
+        self.manager.record(env=env, aslr=aslr, redirect=redirect)
+
+    def replay(self):
+        from signal import sigwait, SIGINT
+
+        self.manager.kill()
+        self.manager.replay()
+        self.manager.view()
+        sigwait([SIGINT])
+        self.manager.exit()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args) -> bool | None:
+        return self.manager.__exit__(*args)
 
 
 @dataclass
@@ -609,15 +642,12 @@ class Tube(metaclass=ABCMeta):
 class SocketTube(Tube):
     from socket import socket
 
-    INTERVAL: float = 0.1
-    RECVSZ: int = 0x1000
-
     def __init__(self, sk: socket):
         from socket import socket
 
         sendsk, recvsk = sk, sk.dup()
         sendsk.settimeout(None)
-        recvsk.settimeout(self.INTERVAL)
+        recvsk.settimeout(0.1)
         self.__sendsk: socket = sendsk
         self.__recvsk: socket = recvsk
 
@@ -625,7 +655,7 @@ class SocketTube(Tube):
         return self.__sendsk.send(data)
 
     def recv(self) -> bytes:
-        return self.__recvsk.recv(self.RECVSZ)
+        return self.__recvsk.recv(0x1000)
 
     def close(self):
         self.__sendsk.close()
@@ -811,7 +841,6 @@ class Context:
         from contextlib import ExitStack
         from socket import socket, socketpair
         from subprocess import DEVNULL
-        from signal import sigwait, SIGINT
 
         if not command and not connect:
             raise ValueError
@@ -839,16 +868,11 @@ class Context:
                     if debug:
                         if command.lookup(GdbServer) or command.lookup(Qemu):
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
-                            launcher.view()
                         elif command.lookup(RR):
                             launcher.record(env=env, aslr=aslr, redirect=redirect)
 
                             def helper():
-                                launcher.kill()
                                 launcher.replay()
-                                launcher.view()
-                                sigwait([SIGINT])
-                                launcher.exit()
                         else:
                             raise NotImplementedError
                     else:
@@ -857,7 +881,6 @@ class Context:
                         if command.lookup(GdbServer):
                             def helper():
                                 launcher.attach(pid)
-                                launcher.view()
                 except:
                     if isinstance(skt, socket):
                         skt.close()
@@ -881,9 +904,6 @@ class Context:
         except:
             context.close()
             raise
-
-    def close(self):
-        self.__context.close()
 
     def __enter__(self) -> tuple[Proxy, Helper]:
         return (self.proxy, self.helper)
