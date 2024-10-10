@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-def printsymlink(item: Path):
+def pprint(item: Path):
     from sys import stderr
 
     RED = '\033[31m'
@@ -18,17 +18,15 @@ def printsymlink(item: Path):
     print(message, file=stderr)
 
 
-def rootlink(sysroot: str):
+def rootlink(sysroot: Path):
     from contextlib import suppress
-    from pathlib import Path
-    from os import walk
-    from os.path import relpath
 
-    sysroot_ = Path(sysroot)
+    if not sysroot.exists():
+        raise FileNotFoundError
 
-    for path, dirs, files in walk(sysroot_):
+    for path, dirs, files in sysroot.walk():
         for item in dirs+files:
-            item = Path(path, item)
+            item = path.joinpath(item)
 
             if not item.is_symlink():
                 continue
@@ -39,14 +37,14 @@ def rootlink(sysroot: str):
                 continue
 
             symlink = symlink.relative_to(symlink.root)
-            symlink = sysroot_.joinpath(symlink)
-            symlink = relpath(symlink, item.parent)
+            symlink = sysroot.joinpath(symlink)
+            symlink = symlink.relative_to(item.parent, walk_up=True)
 
             with suppress(FileNotFoundError):
                 item.unlink()
 
             item.symlink_to(symlink)
-            printsymlink(item)
+            pprint(item)
 
 
 def docker_cpall(image: str) -> str:
@@ -69,6 +67,7 @@ def docker_cpall(image: str) -> str:
 
 def main():
     from argparse import ArgumentParser
+    from pathlib import Path
 
     parser = ArgumentParser()
     parser.add_argument('-d', '--docker', action='store_true')
@@ -79,7 +78,7 @@ def main():
     if args.docker:
         out = docker_cpall(out)
 
-    rootlink(out)
+    rootlink(Path(out))
 
 
 if __name__ == '__main__':
