@@ -452,14 +452,15 @@ class Executor:
         return self.__popen(command, None, False)
 
 
+class ExitError(Exception):
+    pass
+
+
 @dataclass
 class ProcessManager(AbstractContextManager):
     from subprocess import Popen
 
     executor: Executor
-
-    class ExitError(Exception):
-        pass
 
     def __init__(self, command: Command):
         from contextlib import ExitStack
@@ -515,13 +516,13 @@ class ProcessManager(AbstractContextManager):
         self.__context.pop_all().close()
 
     def exit(self):
-        raise self.ExitError
+        raise ExitError
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> bool | None:
-        ignore = args[0] is self.ExitError
+        ignore = issubclass(args[0], ExitError)
         args = args if not ignore else (None, None, None)
         return self.__context.__exit__(*args) or ignore
 
