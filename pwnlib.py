@@ -875,7 +875,7 @@ class Context:
                         elif command.lookup(RR):
                             launcher.record(env=env, aslr=aslr, redirect=redirect)
 
-                            def helper():
+                            def helper():  # type:ignore
                                 launcher.replay(view=view)
                         else:
                             raise NotImplementedError
