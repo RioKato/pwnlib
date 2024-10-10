@@ -536,8 +536,10 @@ class Launcher(AbstractContextManager):
         self.manager = ProcessManager(command)
 
     def __view(self, view: bool):
-        if view:
-            self.manager.view()
+        if not view:
+            return
+
+        self.manager.view()
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
         return self.manager.run(env=env, aslr=aslr, redirect=redirect)
