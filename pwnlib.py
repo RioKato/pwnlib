@@ -1,4 +1,4 @@
-from typing import IO, Callable, ClassVar, Iterator, Literal, Self, cast
+from typing import IO, Callable, Iterator, Literal, Self, cast
 from abc import ABCMeta, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -535,26 +535,30 @@ class Launcher(AbstractContextManager):
     def __init__(self, command: Command):
         self.manager = ProcessManager(command)
 
+    def __view(self, view: bool):
+        if view:
+            self.manager.view()
+
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
         return self.manager.run(env=env, aslr=aslr, redirect=redirect)
 
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, view: bool = True):
         self.manager.debug(env=env, aslr=aslr, redirect=redirect)
-        self.manager.view()
+        self.__view(view)
 
-    def attach(self, pid: int):
+    def attach(self, pid: int, *, view: bool = True):
         self.manager.attach(pid)
-        self.manager.view()
+        self.__view(view)
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
         self.manager.record(env=env, aslr=aslr, redirect=redirect)
 
-    def replay(self):
+    def replay(self, *, view: bool = True):
         from signal import sigwait, SIGINT
 
         self.manager.kill()
         self.manager.replay()
-        self.manager.view()
+        self.__view(view)
         sigwait([SIGINT])
         self.manager.exit()
 
@@ -837,7 +841,7 @@ class Context:
 
     def __init__(self, command: Command | None, connect: Connect | None, *,
                  env: dict[str, str] = {}, aslr: bool = True, debug: bool = False,
-                 verbose: int = 1):
+                 view: bool = True, verbose: int = 1):
         from contextlib import ExitStack
         from socket import socket, socketpair
         from subprocess import DEVNULL
@@ -867,12 +871,12 @@ class Context:
                 try:
                     if debug:
                         if command.lookup(GdbServer) or command.lookup(Qemu):
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                            launcher.debug(env=env, aslr=aslr, redirect=redirect, view=view)
                         elif command.lookup(RR):
                             launcher.record(env=env, aslr=aslr, redirect=redirect)
 
                             def helper():
-                                launcher.replay()
+                                launcher.replay(view=view)
                         else:
                             raise NotImplementedError
                     else:
@@ -880,7 +884,7 @@ class Context:
 
                         if command.lookup(GdbServer):
                             def helper():
-                                launcher.attach(pid)
+                                launcher.attach(pid, view=view)
                 except:
                     if isinstance(skt, socket):
                         skt.close()
