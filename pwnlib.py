@@ -521,11 +521,9 @@ class ProcessManager(AbstractContextManager):
         return self
 
     def __exit__(self, *args) -> bool | None:
-        if args[0] is self.ExitError:
-            self.__context.__exit__(None, None, None)
-            return True
-        else:
-            return self.__context.__exit__(*args)
+        ignore = args[0] is self.ExitError
+        args = args if not ignore else (None, None, None)
+        return self.__context.__exit__(*args) or ignore
 
 
 @dataclass
