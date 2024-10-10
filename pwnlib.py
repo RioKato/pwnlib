@@ -457,7 +457,7 @@ class ExitError(Exception):
 
 
 @dataclass
-class ProcessManager(AbstractContextManager):
+class Context(AbstractContextManager):
     from subprocess import Popen
 
     executor: Executor
@@ -529,45 +529,43 @@ class ProcessManager(AbstractContextManager):
 
 @dataclass
 class Launcher(AbstractContextManager):
-    manager: ProcessManager
+    context: Context
 
     def __init__(self, command: Command):
-        self.manager = ProcessManager(command)
+        self.context = Context(command)
 
     def __view(self, view: bool):
-        if not view:
-            return
-
-        self.manager.view()
+        if view:
+            self.context.view()
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
-        return self.manager.run(env=env, aslr=aslr, redirect=redirect)
+        return self.context.run(env=env, aslr=aslr, redirect=redirect)
 
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, view: bool = True):
-        self.manager.debug(env=env, aslr=aslr, redirect=redirect)
+        self.context.debug(env=env, aslr=aslr, redirect=redirect)
         self.__view(view)
 
     def attach(self, pid: int, *, view: bool = True):
-        self.manager.attach(pid)
+        self.context.attach(pid)
         self.__view(view)
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
-        self.manager.record(env=env, aslr=aslr, redirect=redirect)
+        self.context.record(env=env, aslr=aslr, redirect=redirect)
 
     def replay(self, *, view: bool = True):
         from signal import sigwait, SIGINT
 
-        self.manager.kill()
-        self.manager.replay()
+        self.context.kill()
+        self.context.replay()
         self.__view(view)
         sigwait([SIGINT])
-        self.manager.exit()
+        self.context.exit()
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> bool | None:
-        return self.manager.__exit__(*args)
+        return self.context.__exit__(*args)
 
 
 @dataclass
@@ -836,10 +834,11 @@ class Proxy(Thread, AbstractContextManager):
                 self.sendline(data)
 
 
-class Context:
-    type Connect = Callable[[], Tube]
-    type Helper = Callable[[], None]
+type Connect = Callable[[], Tube]
+type Helper = Callable[[], None]
 
+
+class Setup:
     def __init__(self, command: Command | None, connect: Connect | None, *,
                  env: dict[str, str] = {}, aslr: bool = True, debug: bool = False,
                  view: bool = True, verbose: int = 1):
@@ -905,7 +904,7 @@ class Context:
             context.enter_context(proxy)
             self.__context: ExitStack = context
             self.proxy: Proxy = proxy
-            self.helper: Context.Helper = helper
+            self.helper: Helper = helper
         except:
             context.close()
             raise
