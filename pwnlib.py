@@ -1,13 +1,13 @@
-from typing import IO, Callable, ClassVar, Iterator, Literal, Self, cast
+from typing import IO, Callable, Iterator, Literal, Self, cast
 from abc import ABCMeta, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from threading import Thread
+from multiprocessing import Process
 from socket import socket
 
 __all__ = [
-    'Alias', 'Target', 'GdbServer', 'RR', 'Qemu', 'Docker', 'Tmux', 'Display',
-    'Context', 'Net',
+    'Alias', 'Target', 'GdbServer', 'RR', 'Tmux', 'Display',
+    'Setup', 'Net',
     'p8', 'p16', 'p32', 'p64', 'pf', 'pd',
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
     'block',
@@ -37,15 +37,24 @@ class Color:
     WHITE: str = __ansi('\033[37m')
 
 
+class Developer:
+    enable: bool = False
+
+    @classmethod
+    def print(cls, message: str):
+        from sys import stderr
+
+        if cls.enable:
+            print(f'{Color.RED}[DEV]{Color.END} {message}', file=stderr, flush=True)
+
+
 @dataclass
 class Alias:
-    sh: str = 'sh'
     env: str = 'env'
     setarch: str = 'setarch'
     gdb: str = 'gdb'
     gdbserver: str = 'gdbserver'
     rr: str = 'rr'
-    docker: str = 'docker'
     tmux: str = 'tmux'
 
 
@@ -55,36 +64,27 @@ class Command(metaclass=ABCMeta):
     def alias(self) -> Alias:
         pass
 
-    @property
-    @abstractmethod
-    def executable(self) -> str:
-        pass
-
     @abstractmethod
     def lookup[T: Command](self, cls: type[T]) -> T | None:
         pass
 
     def run(self, env: dict[str, str], aslr: bool) -> list[str]:
-        return []
+        raise NotImplementedError
 
     def debug(self, env: dict[str, str], aslr: bool) -> list[str]:
-        return []
+        raise NotImplementedError
 
     def attach(self, pid: int) -> list[str]:
-        return []
+        raise NotImplementedError
 
     def record(self, env: dict[str, str], aslr: bool) -> list[str]:
-        return []
+        raise NotImplementedError
 
     def replay(self) -> list[str]:
-        return []
+        raise NotImplementedError
 
     def view(self) -> list[str]:
-        return []
-
-    @abstractmethod
-    def runpid(self, pid: int) -> int:
-        pass
+        raise NotImplementedError
 
 
 @dataclass
@@ -98,10 +98,6 @@ class Target(Command):
     @property
     def alias(self) -> Alias:
         return self.__alias
-
-    @property
-    def executable(self) -> str:
-        return self.command[0] if self.command else ''
 
     def lookup[T: Command](self, cls: type[T]) -> T | None:
         if isinstance(self, cls):
@@ -124,9 +120,6 @@ class Target(Command):
         command += self.command
         return command
 
-    def runpid(self, pid: int) -> int:
-        return pid
-
 
 @dataclass
 class Outer(Command):
@@ -135,10 +128,6 @@ class Outer(Command):
     @property
     def alias(self) -> Alias:
         return self.command.alias
-
-    @property
-    def executable(self) -> str:
-        return self.command.executable
 
     def lookup[T: Command](self, cls: type[T]) -> T | None:
         if isinstance(self, cls):
@@ -163,9 +152,6 @@ class Outer(Command):
 
     def view(self) -> list[str]:
         return self.command.view()
-
-    def runpid(self, pid: int) -> int:
-        return self.command.runpid(pid)
 
 
 @dataclass
@@ -245,97 +231,6 @@ class RR(Gdb):
 
     def replay(self) -> list[str]:
         return [self.alias.rr, 'replay', '-s', f'{self.port}']
-
-
-@dataclass
-class Qemu(Gdb):
-    def __post_init__(self):
-        self.file = self.file if self.file else self.executable
-
-    def __qemu(self, env: dict[str, str], aslr: bool, debug: bool) -> list[str]:
-        if aslr:
-            raise ValueError
-
-        qemu_set_env = [f'{k}={v}' for (k, v) in env.items()]
-        qemu_set_env = ','.join(qemu_set_env)
-        env = {}
-
-        if qemu_set_env:
-            env['QEMU_SET_ENV'] = qemu_set_env
-
-        if self.sysroot:
-            env['QEMU_LD_PREFIX'] = self.sysroot
-
-        if debug:
-            env['QEMU_GDB'] = f'{self.port}'
-
-        return self.command.run(env, True)
-
-    def run(self, env: dict[str, str], aslr: bool) -> list[str]:
-        return self.__qemu(env, aslr, False)
-
-    def debug(self, env: dict[str, str], aslr: bool) -> list[str]:
-        return self.__qemu(env, aslr, True)
-
-
-@dataclass
-class Docker(Outer):
-    image: str
-    name: str
-    net: str = 'host'
-    initcpid: int = 7
-    options: list[str] = field(default_factory=list)
-
-    def __docker_run(self, inner: list[str], *options: str) -> list[str]:
-        command = [self.alias.docker, 'run', '-i', '--privileged', f'--name={self.name}']
-
-        if self.net:
-            command += [f'--net={self.net}']
-
-        command += options
-        command += self.options
-        command += [self.image]
-        command += inner
-        return command
-
-    def __docker_exec(self, inner: list[str]) -> list[str]:
-        command = [self.alias.docker, 'exec', '-i', self.name]
-        command += inner
-        return command
-
-    def __docker_start(self) -> list[str]:
-        return [self.alias.docker, 'start', '-i', self.name]
-
-    def run(self, env: dict[str, str], aslr: bool) -> list[str]:
-        command = self.command.run(env, aslr)
-        return self.__docker_run(command, '--init')
-
-    def debug(self, env: dict[str, str], aslr: bool) -> list[str]:
-        command = self.command.debug(env, aslr)
-        return self.__docker_run(command)
-
-    def attach(self, pid: int) -> list[str]:
-        command = self.command.attach(pid)
-        return self.__docker_exec(command)
-
-    def record(self, env: dict[str, str], aslr: bool) -> list[str]:
-        from shlex import join
-
-        record = self.command.record(env, aslr)
-        record = join(record)
-        replay = self.command.replay()
-        replay = join(replay)
-        command = [self.alias.sh, '-c', f'{replay} > /dev/null 2>&1 || {record}']
-        return self.__docker_run(command)
-
-    def replay(self) -> list[str]:
-        return self.__docker_start()
-
-    def runpid(self, pid: int) -> int:
-        # If Gdb attaches to a process with pid 1, interrupt command (C-c) will not work.
-        # https://sourceware.org/bugzilla/show_bug.cgi?id=18945
-        # The pid of the child process of the "--init" process inside the container is empirically 7.
-        return self.initcpid
 
 
 @dataclass
@@ -452,45 +347,61 @@ class Executor:
         return self.__popen(command, None, False)
 
 
+class ExitError(Exception):
+    pass
+
+
 @dataclass
-class Launcher(AbstractContextManager):
+class Context(AbstractContextManager):
     from subprocess import Popen
 
     executor: Executor
-    INTERVAL: ClassVar[float] = 0.1
-
-    class ExitError(Exception):
-        pass
 
     def __init__(self, command: Command):
         from contextlib import ExitStack
 
         self.executor = Executor(command)
-        self.__context: ExitStack = ExitStack()
+        self.__estack: ExitStack = ExitStack()
 
     def __pclose(self, popen: Popen):
         from contextlib import suppress
-        from signal import SIGINT, SIGTERM, SIGKILL
         from subprocess import TimeoutExpired
 
-        def callback():
+        if Developer.enable:
+            def log():
+                from signal import Signals
+
+                code = popen.returncode
+
+                if code >= 0:
+                    reason = f'pid={popen.pid}, code={code}'
+                else:
+                    name = Signals(-code).name
+                    reason = f'pid={popen.pid}, signal={name}'
+
+                Developer.print(f'The process has terminated ({reason})')
+
+            self.__estack.callback(log)
+
+        def kill():
             if popen.poll() is not None:
                 return
 
-            for signal in [SIGINT, SIGTERM, SIGKILL]:
-                popen.send_signal(signal)
+            popen.terminate()
 
-                with suppress(TimeoutExpired):
-                    popen.wait(self.INTERVAL)
-                    return
+            with suppress(TimeoutExpired):
+                popen.wait(1)
+                return
 
-        self.__context.enter_context(popen)
-        self.__context.callback(callback)
+            popen.kill()
+
+        self.__estack.enter_context(popen)
+        self.__estack.callback(kill)
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
-        return self.executor.command.runpid(popen.pid)
+        return popen.pid
 
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
@@ -513,41 +424,69 @@ class Launcher(AbstractContextManager):
         self.__pclose(popen)
 
     def kill(self):
-        self.__context.pop_all().close()
+        self.__estack.pop_all().close()
+
+    def atexit(self, callback: Callable[[], None]):
+        self.__estack.callback(callback)
 
     def exit(self):
-        raise self.ExitError
-
-    def close(self):
-        self.__context.close()
+        raise ExitError
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> bool | None:
-        if args[0] == self.ExitError:
-            self.__context.__exit__(None, None, None)
-            return True
-        else:
-            return self.__context.__exit__(*args)
+        ignore = args[0] and issubclass(args[0], ExitError)
+        args = args if not ignore else (None, None, None)
+        return self.__estack.__exit__(*args) or ignore
 
 
 @dataclass
-class Container(AbstractContextManager):
-    docker: Docker
+class Launcher(AbstractContextManager):
+    context: Context
 
-    def remove(self):
-        from subprocess import run, DEVNULL
+    def __init__(self, command: Command):
+        self.context = Context(command)
 
-        command = [self.docker.alias.docker, 'rm', '-f', self.docker.name]
-        stdin = stdout = stderr = DEVNULL
-        run(command, stdin=stdin, stdout=stdout, stderr=stderr)
+    def __view(self, view: bool):
+        if view:
+            self.context.view()
 
-    def __enter__(self):
-        self.remove()
+    def __replay(self, view: bool):
+        from signal import sigwait, SIGINT
 
-    def __exit__(self, *_):
-        self.remove()
+        self.context.replay()
+        self.__view(view)
+        sigwait([SIGINT])
+
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
+        return self.context.run(env=env, aslr=aslr, redirect=redirect)
+
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, view: bool = True):
+        self.context.debug(env=env, aslr=aslr, redirect=redirect)
+        self.__view(view)
+
+    def attach(self, pid: int, *, view: bool = True):
+        self.context.attach(pid)
+        self.__view(view)
+
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, atexit: bool = True, view: bool = True):
+        if atexit:
+            callback = lambda: self.__replay(view)
+            self.context.atexit(callback)
+
+        self.context.record(env=env, aslr=aslr, redirect=redirect)
+
+    def replay(self, *, view: bool = True):
+        self.context.kill()
+        self.__replay(view)
+        self.context.exit()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args) -> bool | None:
+        return self.context.__exit__(*args)
 
 
 class Hexdump:
@@ -583,13 +522,13 @@ class Hexdump:
 
         while data:
             fst, snd, data = data[:8], data[8:16], data[16:]
-            left, middle, right = dumpq(fst), dumpq(snd), dumps(fst+snd)
+            left, middle, right = dumpq(fst), dumpq(snd), dumps(fst + snd)
             yield f'{Color.CYAN}[{offset:04x}]{Color.END} {left} {middle} {right}'
             offset += 0x10
 
     @staticmethod
     def border(char: str) -> str:
-        return char*57
+        return char * 57
 
 
 class Tube(metaclass=ABCMeta):
@@ -606,18 +545,15 @@ class Tube(metaclass=ABCMeta):
         pass
 
 
-class SocketTube(Tube):
+class Socket(Tube):
     from socket import socket
-
-    INTERVAL: float = 0.1
-    RECVSZ: int = 0x1000
 
     def __init__(self, sk: socket):
         from socket import socket
 
         sendsk, recvsk = sk, sk.dup()
         sendsk.settimeout(None)
-        recvsk.settimeout(self.INTERVAL)
+        recvsk.settimeout(None)
         self.__sendsk: socket = sendsk
         self.__recvsk: socket = recvsk
 
@@ -625,7 +561,7 @@ class SocketTube(Tube):
         return self.__sendsk.send(data)
 
     def recv(self) -> bytes:
-        return self.__recvsk.recv(self.RECVSZ)
+        return self.__recvsk.recv(0x1000)
 
     def close(self):
         self.__sendsk.close()
@@ -649,7 +585,7 @@ class Logger(Tube):
 
         if text:
             border = Hexdump.border('-')
-            text = f'{header} {border}\n'+text
+            text = f'{header} {border}\n' + text
 
         return text
 
@@ -682,35 +618,45 @@ class Logger(Tube):
         self.__tube.close()
 
 
-class Proxy(Thread, AbstractContextManager):
-    def __init__(self, tube: Tube):
-        from threading import Event
-        from queue import Queue
+class Proxy(Process, AbstractContextManager):
+    from socket import socket
 
+    def __init__(self, tube: Tube | socket, *, verbose: int = 1):
+        from socket import socket
+        from multiprocessing import Queue
+
+        if isinstance(tube, socket):
+            tube = Socket(tube)
+
+        tube = Logger(tube, verbose)
         super().__init__()
         self.__tube: Tube = tube
-        self.__event: Event = Event()
         self.__queue: Queue = Queue()
+        self.__eof: bool = False
         self.__buffer: bytes = b''
-        self.start()
 
     def run(self):
         from contextlib import suppress
 
-        while not self.__event.is_set():
-            with suppress(TimeoutError):
-                if data := self.__tube.recv():
-                    self.__queue.put(data)
+        with suppress(Exception):
+            while data := self.__tube.recv():
+                self.__queue.put(data)
+
+        self.__queue.put(b'')
 
     def stop(self):
-        self.__event.set()
+        if self.is_alive():
+            self.terminate()
+
         self.join()
+        self.close()
         self.__tube.close()
 
     def __enter__(self) -> Self:
+        self.start()
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_) -> bool | None:
         self.stop()
 
     def send(self, data: bytes):
@@ -719,29 +665,46 @@ class Proxy(Thread, AbstractContextManager):
             data = data[n:]
 
     def sendline(self, data: bytes):
-        return self.send(data+b'\n')
+        return self.send(data + b'\n')
 
-    def recv(self, *, size: int = -1, timeout: float = -1) -> bytes:
-        from contextlib import suppress
+    def __recv(self, timeout: float) -> bytes:
         from queue import Empty
 
-        with suppress(Empty):
-            while not self.__queue.empty():
-                self.__buffer += self.__queue.get(block=False)
+        if self.__eof:
+            raise EOFError
 
-        if timeout and not self.__buffer:
-            try:
-                timeout = timeout if timeout > 0 else None  # type:ignore
-                self.__buffer = self.__queue.get(block=True, timeout=timeout)
-            except Empty as e:
+        block = bool(timeout)
+        timeout = timeout if timeout > 0 else None  # type:ignore
+
+        try:
+            if data := self.__queue.get(block=block, timeout=timeout):
+                return data
+            else:
+                self.__eof = True
+                raise EOFError
+        except Empty as e:
+            if block:
                 raise TimeoutError from e
+            else:
+                return b''
+
+    def recv(self, *, size: int = -1, timeout: float = -1) -> bytes:
+        try:
+            while data := self.__recv(0):
+                self.__buffer += data
+
+            if timeout and not self.__buffer:
+                self.__buffer = self.__recv(timeout)
+        except EOFError:
+            if not self.__buffer:
+                raise
 
         size = size if size >= 0 else len(self.__buffer)
         data, self.__buffer = self.__buffer[:size], self.__buffer[size:]
         return data
 
     def __cancel(self, data: bytes):
-        self.__buffer = data+self.__buffer
+        self.__buffer = data + self.__buffer
 
     def recvcond(self, cond: Callable[[bytes], int], *, timeout: float = -1) -> bytes:
         data = b''
@@ -753,7 +716,9 @@ class Proxy(Thread, AbstractContextManager):
                 self.__cancel(data)
                 raise
 
-            if (pos := cond(data)) >= 0:
+            pos = cond(data)
+
+            if pos >= 0:
                 data, rest = data[:pos], data[pos:]
                 self.__cancel(rest)
                 return data
@@ -764,7 +729,9 @@ class Proxy(Thread, AbstractContextManager):
 
     def recvuntil(self, delim: bytes, *, timeout: float = -1) -> bytes:
         def cond(data: bytes) -> int:
-            if (pos := data.find(delim)) != -1:
+            pos = data.find(delim)
+
+            if pos != -1:
                 pos += len(delim)
                 return pos
             else:
@@ -801,66 +768,53 @@ class Proxy(Thread, AbstractContextManager):
                 self.sendline(data)
 
 
-class Context:
-    type Connect = Callable[[], Tube]
-    type Helper = Callable[[], None]
+type Connect = Callable[[], Tube]
+type Helper = Callable[[], None]
 
-    def __init__(self, command: Command | None, connect: Connect | None, *,
-                 env: dict[str, str] = {}, aslr: bool = True, debug: bool = False,
-                 verbose: int = 1):
+
+class Setup(AbstractContextManager):
+    def __init__(self, command: Command | None, connect: Connect | None, debug: bool, *,
+                 env: dict[str, str] = {}, aslr: bool = True,
+                 view: bool = True, verbose: int = 1):
         from contextlib import ExitStack
         from socket import socket, socketpair
         from subprocess import DEVNULL
-        from signal import sigwait, SIGINT
 
-        if not command and not connect:
-            raise ValueError
-
-        context = ExitStack()
+        assert (command or connect)
+        estack = ExitStack()
 
         try:
-            def helper():
-                pass
+            helper = lambda: None
 
             if connect:
-                skt, redirect = None, DEVNULL
+                sk, redirect = None, DEVNULL
             else:
-                skt, redirect = socketpair()
+                sk, redirect = socketpair()
 
             if command:
-                if docker := command.lookup(Docker):
-                    docker = Container(docker)
-                    context.enter_context(docker)
-
                 launcher = Launcher(command)
-                context.enter_context(launcher)
+                estack.enter_context(launcher)
 
                 try:
                     if debug:
-                        if command.lookup(GdbServer) or command.lookup(Qemu):
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
-                            launcher.view()
-                        elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect)
-
-                            def helper():
-                                launcher.kill()
-                                launcher.replay()
-                                launcher.view()
-                                sigwait([SIGINT])
-                                launcher.exit()
-                        else:
-                            raise NotImplementedError
-                    else:
-                        pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
-
                         if command.lookup(GdbServer):
-                            def helper():
-                                launcher.attach(pid)
-                                launcher.view()
+                            launcher.debug(env=env, aslr=aslr, redirect=redirect, view=view)
+                        elif command.lookup(RR):
+                            launcher.record(env=env, aslr=aslr, redirect=redirect, atexit=True, view=view)
+                        else:
+                            launcher.debug(env=env, aslr=aslr, redirect=redirect, view=view)
+                    else:
+                        if command.lookup(GdbServer):
+                            pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
+                            helper = lambda: launcher.attach(pid, view=view)
+                        elif command.lookup(RR):
+                            launcher.record(env=env, aslr=aslr, redirect=redirect, atexit=False)
+                            helper = lambda: launcher.replay(view=view)
+                        else:
+                            launcher.run(env=env, aslr=aslr, redirect=redirect)
                 except:
-                    if isinstance(skt, socket):
-                        skt.close()
+                    if sk:
+                        sk.close()
                     raise
                 finally:
                     if isinstance(redirect, socket):
@@ -869,36 +823,30 @@ class Context:
             if connect:
                 tube = connect()
             else:
-                assert (skt)
-                tube = SocketTube(skt)
+                assert (sk)
+                tube = sk
 
-            tube = Logger(tube, verbose)
-            proxy = Proxy(tube)
-            context.enter_context(proxy)
-            self.__context: ExitStack = context
+            proxy = Proxy(tube, verbose=verbose)
+            estack.enter_context(proxy)
+            self.__estack: ExitStack = estack
             self.proxy: Proxy = proxy
-            self.helper: Context.Helper = helper
+            self.helper: Helper = helper
         except:
-            context.close()
+            estack.close()
             raise
-
-    def close(self):
-        self.__context.close()
 
     def __enter__(self) -> tuple[Proxy, Helper]:
         return (self.proxy, self.helper)
 
     def __exit__(self, *args) -> bool | None:
-        return self.__context.__exit__(*args)
+        return self.__estack.__exit__(*args)
 
 
 class Net:
     from ssl import SSLContext
 
-    INTERVAL: float = 0.1
-
-    @classmethod
-    def tcp(cls, host: str, port: int, *, ssl: SSLContext | None = None) -> Tube:
+    @staticmethod
+    def tcp(host: str, port: int, *, ssl: SSLContext | None = None) -> Tube:
         from contextlib import suppress
         from socket import socket
         from time import sleep
@@ -914,9 +862,9 @@ class Net:
                     sk.connect((host, port))
                     break
 
-                sleep(cls.INTERVAL)
+                sleep(0.1)
 
-            return SocketTube(sk)
+            return Socket(sk)
         except:
             sk.close()
             raise
@@ -933,16 +881,16 @@ class Net:
             sk.close()
             raise
 
-        return SocketTube(sk)
+        return Socket(sk)
 
     @staticmethod
     def SSLNoVerify() -> SSLContext:
         from ssl import SSLContext, PROTOCOL_TLS_CLIENT, CERT_NONE
 
-        context = SSLContext(PROTOCOL_TLS_CLIENT)
-        context.check_hostname = False
-        context.verify_mode = CERT_NONE
-        return context
+        ssl = SSLContext(PROTOCOL_TLS_CLIENT)
+        ssl.check_hostname = False
+        ssl.verify_mode = CERT_NONE
+        return ssl
 
 
 class Limit:
@@ -950,10 +898,10 @@ class Limit:
     INT16_MIN: int = -(1 << 15)
     INT32_MIN: int = -(1 << 31)
     INT64_MIN: int = -(1 << 63)
-    UINT8_MAX: int = (1 << 8)-1
-    UINT16_MAX: int = (1 << 16)-1
-    UINT32_MAX: int = (1 << 32)-1
-    UINT64_MAX: int = (1 << 64)-1
+    UINT8_MAX: int = (1 << 8) - 1
+    UINT16_MAX: int = (1 << 16) - 1
+    UINT32_MAX: int = (1 << 32) - 1
+    UINT64_MAX: int = (1 << 64) - 1
 
 
 type ByteOrder = Literal['little', 'big']
@@ -1033,8 +981,8 @@ def block(size: int, *pair: tuple[int, bytes]) -> bytes:
     dst = bytearray(size)
 
     for (i, src) in pair:
-        assert (0 <= i <= i+len(src) <= size)
-        dst[i:i+len(src)] = src
+        assert (0 <= i <= i + len(src) <= size)
+        dst[i:i + len(src)] = src
 
     return bytes(dst)
 
@@ -1045,9 +993,9 @@ def rol64(value: int, n: int) -> int:
     value &= Limit.UINT64_MAX
 
     if 0 <= n:
-        value = (value << n) | (value >> (64-n))
+        value = (value << n) | (value >> (64 - n))
     else:
-        value = (value >> (-n)) | (value << (64+n))
+        value = (value >> (-n)) | (value << (64 + n))
 
     value &= Limit.UINT64_MAX
     return value

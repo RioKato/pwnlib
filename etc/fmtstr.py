@@ -20,8 +20,8 @@ def fmtstr(idx: int, write: list[tuple[int, bytes]], *,
             else:
                 addr0, value0 = result[-1]
 
-                if addr0+len(value0) == addr1:
-                    result[-1] = (addr0, value0+value1)
+                if addr0 + len(value0) == addr1:
+                    result[-1] = (addr0, value0 + value1)
                 else:
                     result.append((addr1, value1))
 
@@ -72,8 +72,8 @@ def fmtstr(idx: int, write: list[tuple[int, bytes]], *,
         size = 8 if not bit32 else 4
 
         def align(n: int) -> int:
-            mask = size-1
-            return (n+mask) & ~mask
+            mask = size - 1
+            return (n + mask) & ~mask
 
         write = sorted(write, key=lambda e: e[1])
 
@@ -81,7 +81,7 @@ def fmtstr(idx: int, write: list[tuple[int, bytes]], *,
         hooter = b''
         prev = iv
         for (addr, i, spec) in write:
-            prev, delta = i, i-prev
+            prev, delta = i, i - prev
 
             match delta:
                 case 0:
@@ -98,10 +98,10 @@ def fmtstr(idx: int, write: list[tuple[int, bytes]], *,
 
         i = idx
         while True:
-            payload = fmt.format(*list(range(i, i+len(write))))
+            payload = fmt.format(*list(range(i, i + len(write))))
             payload = payload.ljust(align(len(payload)), 'X')
 
-            if i == idx+len(payload)//size:
+            if i == idx + len(payload) // size:
                 break
 
             i += 1

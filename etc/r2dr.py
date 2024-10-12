@@ -28,28 +28,28 @@ def r2dr(fun: dict[str, int],
             return pack_into(symfmt, buf, offset, st_name, 0, 0, 0x12, 0, 0)
 
     def packstr(buf: bytearray, offset: int, data: str):
-        buf[offset:offset+len(data)] = data.encode()
+        buf[offset:offset + len(data)] = data.encode()
 
     relsz = calcsize(relfmt)
     symsz = calcsize(symfmt)
 
     tail = dummy
-    relidx = (tail-jmprel+relsz-1)//relsz
-    tail = jmprel+relsz*(relidx+len(fun))
-    symidx = (tail-symtab+symsz-1)//symsz
-    tail = symtab+symsz*(symidx+len(fun))
-    stridx = tail-strtab
-    tail = tail+sum([len(i)+1 for i in fun.keys()])
+    relidx = (tail - jmprel + relsz - 1) // relsz
+    tail = jmprel + relsz * (relidx + len(fun))
+    symidx = (tail - symtab + symsz - 1) // symsz
+    tail = symtab + symsz * (symidx + len(fun))
+    stridx = tail - strtab
+    tail = tail + sum([len(i) + 1 for i in fun.keys()])
 
     relpos = {}
-    buf = bytearray(tail-dummy)
-    straddr = strtab+stridx
+    buf = bytearray(tail - dummy)
+    straddr = strtab + stridx
     for (i, (name, r_offset)) in enumerate(fun.items()):
-        relpos[name] = relidx+i
-        packrel(buf, jmprel+relsz*(relidx+i)-dummy, r_offset, symidx+i)
-        packsym(buf, symtab+symsz*(symidx+i)-dummy, straddr-strtab)
-        packstr(buf, straddr-dummy, name+'\x00')
-        straddr += len(name)+1
+        relpos[name] = relidx + i
+        packrel(buf, jmprel + relsz * (relidx + i) - dummy, r_offset, symidx + i)
+        packsym(buf, symtab + symsz * (symidx + i) - dummy, straddr - strtab)
+        packstr(buf, straddr - dummy, name + '\x00')
+        straddr += len(name) + 1
     buf = bytes(buf)
 
     return (relpos, buf)

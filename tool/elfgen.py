@@ -51,13 +51,13 @@ def nm(path: str, *options: str) -> list[tuple[str, int]]:
     return [(k, int(v, 16)) for v, k in findall(pattern, result, MULTILINE)]
 
 
-def objdump(path: str) -> list[tuple[str, int]]:
+def readelf(path: str) -> list[tuple[str, int]]:
     from subprocess import run
     from re import findall, MULTILINE
 
-    command = ['objdump', '-h', path]
+    command = ['readelf', '-S', '-W', path]
     result = run(command, capture_output=True, text=True, check=True).stdout
-    pattern = r'^\s*\d+\s+\.(\S+)\s+\S+\s+(\S+)\s+\S+\s+\S+\s+\S+$'
+    pattern = r'^\s*\[\s*\d+\]\s+\.(\S+)\s+\S+\s+(\S+).*$'
     return [(k, int(v, 16)) for k, v in findall(pattern, result, MULTILINE)]
 
 
@@ -97,7 +97,7 @@ def main():
             syms += nm(debuginfo, *demangle)
             syms += nm(debuginfo, '-D', *demangle)
 
-    syms += objdump(args.path)
+    syms += readelf(args.path)
     pysyms = {}
 
     for k, v in syms:
