@@ -26,7 +26,7 @@ class Docker(Outer):
 
         command = self.command.run(env, aslr)
         command = join(command)
-        command = self.__sh([f'echo $$ > {self.pidfile}; exec {command};'])
+        command = self.__sh([f'echo $$ > {self.pidfile};', f'exec {command};'])
         return self.__exec(command, '-i')
 
     def debug(self, env: dict[str, str], aslr: bool) -> list[str]:
