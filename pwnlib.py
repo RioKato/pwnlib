@@ -472,8 +472,7 @@ class Launcher(AbstractContextManager):
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None, replay: bool = True):
         if replay:
-            callback = lambda: self.__replay()
-            self.context.atexit(callback)
+            self.context.atexit(self.__replay)
 
         self.context.record(env=env, aslr=aslr, redirect=redirect)
 
