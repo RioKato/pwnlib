@@ -19,9 +19,7 @@ class Docker(Outer):
         return command
 
     def __sh(self, inner: list[str]) -> list[str]:
-        command = [self.sh, '-c']
-        command += ' '.join(inner)
-        return command
+        return [self.sh, '-c', ' '.join(inner)]
 
     def run(self, env: dict[str, str], aslr: bool) -> list[str]:
         from shlex import join
