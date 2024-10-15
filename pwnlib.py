@@ -3,7 +3,6 @@ from abc import ABCMeta, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from multiprocessing import Process
-from socket import socket
 
 __all__ = [
     'Alias', 'Target', 'GdbServer', 'RR', 'Tmux', 'Display',
@@ -12,6 +11,7 @@ __all__ = [
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
     'block',
     'rol64', 'ror64',
+    'iota'
 ]
 
 
@@ -83,7 +83,7 @@ class Command(metaclass=ABCMeta):
     def replay(self) -> list[str]:
         raise NotImplementedError
 
-    def view(self) -> list[str]:
+    def cli(self) -> list[str]:
         raise NotImplementedError
 
 
@@ -150,8 +150,8 @@ class Outer(Command):
     def replay(self) -> list[str]:
         return self.command.replay()
 
-    def view(self) -> list[str]:
-        return self.command.view()
+    def cli(self) -> list[str]:
+        return self.command.cli()
 
 
 @dataclass
@@ -163,7 +163,7 @@ class Gdb(Outer):
     startup: str = 'target remote {host}:{port}'
     script: str = ''
 
-    def view(self) -> list[str]:
+    def cli(self) -> list[str]:
         command = [self.alias.gdb]
 
         if self.sysroot:
@@ -237,10 +237,10 @@ class RR(Gdb):
 class Tmux(Outer):
     options: list[str] = field(default_factory=list)
 
-    def view(self) -> list[str]:
+    def cli(self) -> list[str]:
         command = [self.alias.tmux, 'split']
         command += self.options
-        command += self.command.view()
+        command += self.command.cli()
         return command
 
 
@@ -280,8 +280,8 @@ class Display(Outer):
         self.__display(command)
         return command
 
-    def view(self) -> list[str]:
-        command = self.command.view()
+    def cli(self) -> list[str]:
+        command = self.command.cli()
         self.__display(command)
         return command
 
@@ -297,62 +297,69 @@ class Glibc:
     prctl.argtypes = [c_int, c_ulong, c_ulong, c_ulong, c_ulong]
 
 
-type Redirect = socket | int | None
-
-
 @dataclass
 class Executor:
+    from socket import socket
     from subprocess import Popen
 
     command: Command
 
-    def __popen(self, command: list[str], redirect: Redirect, trace: bool) -> Popen:
+    def __popen(self, command: list[str], trace: bool,
+                stdin: IO | int | None, stdout: IO | int | None, stderr: IO | int | None) -> Popen:
         from subprocess import Popen
 
         def pr_set_ptracer_any():
             Glibc.prctl(Glibc.PR_SET_PTRACER, Glibc.PR_SET_PTRACER_ANY, 0, 0, 0)
 
-        stdin = stdout = stderr = cast(IO | int | None, redirect)
         start_new_session = trace
         preexec_fn = pr_set_ptracer_any if trace else None
         return Popen(command, stdin=stdin, stdout=stdout, stderr=stderr,
                      start_new_session=start_new_session, preexec_fn=preexec_fn)
 
-    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> Popen:
-        command = self.command.run(env, aslr)
-        return self.__popen(command, redirect, True)
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Popen:
+        from subprocess import DEVNULL
 
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> Popen:
+        command = self.command.run(env, aslr)
+        stdin = cast(IO, redirect) if redirect else DEVNULL
+        stdout = stderr = cast(IO, redirect) if redirect else None
+        return self.__popen(command, True, stdin, stdout, stderr)
+
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Popen:
+        from subprocess import DEVNULL
+
         command = self.command.debug(env, aslr)
-        return self.__popen(command, redirect, False)
+        stdin = cast(IO, redirect) if redirect else DEVNULL
+        stdout = stderr = cast(IO, redirect) if redirect else None
+        return self.__popen(command, False, stdin, stdout, stderr)
 
     def attach(self, pid: int) -> Popen:
         from subprocess import DEVNULL
 
         command = self.command.attach(pid)
-        return self.__popen(command, DEVNULL, False)
+        return self.__popen(command, False, DEVNULL, None, None)
 
-    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> Popen:
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Popen:
+        from subprocess import DEVNULL
+
         command = self.command.record(env, aslr)
-        return self.__popen(command, redirect, False)
+        stdin = cast(IO, redirect) if redirect else DEVNULL
+        stdout = stderr = cast(IO, redirect) if redirect else None
+        return self.__popen(command, False, stdin, stdout, stderr)
 
     def replay(self) -> Popen:
         from subprocess import DEVNULL
 
         command = self.command.replay()
-        return self.__popen(command, DEVNULL, False)
+        return self.__popen(command, False, DEVNULL, None, None)
 
-    def view(self) -> Popen:
-        command = self.command.view()
-        return self.__popen(command, None, False)
-
-
-class ExitError(Exception):
-    pass
+    def cli(self) -> Popen:
+        command = self.command.cli()
+        return self.__popen(command, False, None, None, None)
 
 
 @dataclass
 class Context(AbstractContextManager):
+    from socket import socket
     from subprocess import Popen
 
     executor: Executor
@@ -368,7 +375,7 @@ class Context(AbstractContextManager):
         from subprocess import TimeoutExpired
 
         if Developer.enable:
-            def log():
+            def callback():
                 from signal import Signals
 
                 code = popen.returncode
@@ -381,9 +388,9 @@ class Context(AbstractContextManager):
 
                 Developer.print(f'The process has terminated ({reason})')
 
-            self.__estack.callback(log)
+            self.__estack.callback(callback)
 
-        def kill():
+        def callback():
             if popen.poll() is not None:
                 return
 
@@ -396,14 +403,14 @@ class Context(AbstractContextManager):
             popen.kill()
 
         self.__estack.enter_context(popen)
-        self.__estack.callback(kill)
+        self.__estack.callback(callback)
 
-    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
         return popen.pid
 
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
 
@@ -411,7 +418,7 @@ class Context(AbstractContextManager):
         popen = self.executor.attach(pid)
         self.__pclose(popen)
 
-    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None):
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
 
@@ -419,8 +426,8 @@ class Context(AbstractContextManager):
         popen = self.executor.replay()
         self.__pclose(popen)
 
-    def view(self):
-        popen = self.executor.view()
+    def cli(self):
+        popen = self.executor.cli()
         self.__pclose(popen)
 
     def kill(self):
@@ -429,58 +436,50 @@ class Context(AbstractContextManager):
     def atexit(self, callback: Callable[[], None]):
         self.__estack.callback(callback)
 
-    def exit(self):
-        raise ExitError
-
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> bool | None:
-        ignore = args[0] and issubclass(args[0], ExitError)
-        args = args if not ignore else (None, None, None)
-        return self.__estack.__exit__(*args) or ignore
+        return self.__estack.__exit__(*args)
 
 
 @dataclass
 class Launcher(AbstractContextManager):
+    from socket import socket
+
     context: Context
 
     def __init__(self, command: Command):
         self.context = Context(command)
 
-    def __view(self, view: bool):
-        if view:
-            self.context.view()
-
-    def __replay(self, view: bool):
+    def __replay(self):
         from signal import sigwait, SIGINT
 
         self.context.replay()
-        self.__view(view)
+        self.context.cli()
         sigwait([SIGINT])
 
-    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None) -> int:
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         return self.context.run(env=env, aslr=aslr, redirect=redirect)
 
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, view: bool = True):
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         self.context.debug(env=env, aslr=aslr, redirect=redirect)
-        self.__view(view)
+        self.context.cli()
 
-    def attach(self, pid: int, *, view: bool = True):
+    def attach(self, pid: int):
         self.context.attach(pid)
-        self.__view(view)
+        self.context.cli()
 
-    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: Redirect = None, atexit: bool = True, view: bool = True):
-        if atexit:
-            callback = lambda: self.__replay(view)
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None, replay: bool = True):
+        if replay:
+            callback = lambda: self.__replay()
             self.context.atexit(callback)
 
         self.context.record(env=env, aslr=aslr, redirect=redirect)
 
-    def replay(self, *, view: bool = True):
+    def replay(self):
         self.context.kill()
-        self.__replay(view)
-        self.context.exit()
+        self.__replay()
 
     def __enter__(self) -> Self:
         return self
@@ -762,23 +761,22 @@ class Proxy(Process, AbstractContextManager):
     def interactive(self):
         from contextlib import suppress
 
-        with suppress(KeyboardInterrupt, BrokenPipeError):
+        with suppress(KeyboardInterrupt):
             while True:
                 data = input().encode()
                 self.sendline(data)
 
 
-type Connect = Callable[[], Tube]
 type Helper = Callable[[], None]
 
 
 class Setup(AbstractContextManager):
-    def __init__(self, command: Command | None, connect: Connect | None, debug: bool, *,
-                 env: dict[str, str] = {}, aslr: bool = True,
-                 view: bool = True, verbose: int = 1):
+    from socket import socket
+
+    def __init__(self, command: Command | None, connect: Callable[[], Tube | socket] | None, debug: bool, *,
+                 env: dict[str, str] = {}, aslr: bool = True, verbose: int = 1):
         from contextlib import ExitStack
-        from socket import socket, socketpair
-        from subprocess import DEVNULL
+        from socket import socketpair
 
         assert (command or connect)
         estack = ExitStack()
@@ -787,7 +785,7 @@ class Setup(AbstractContextManager):
             helper = lambda: None
 
             if connect:
-                sk, redirect = None, DEVNULL
+                sk, redirect = None, None
             else:
                 sk, redirect = socketpair()
 
@@ -798,18 +796,18 @@ class Setup(AbstractContextManager):
                 try:
                     if debug:
                         if command.lookup(GdbServer):
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect, view=view)
+                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
                         elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect, atexit=True, view=view)
+                            launcher.record(env=env, aslr=aslr, redirect=redirect, replay=True)
                         else:
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect, view=view)
+                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
                     else:
                         if command.lookup(GdbServer):
                             pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
-                            helper = lambda: launcher.attach(pid, view=view)
+                            helper = lambda: launcher.attach(pid)
                         elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect, atexit=False)
-                            helper = lambda: launcher.replay(view=view)
+                            launcher.record(env=env, aslr=aslr, redirect=redirect, replay=False)
+                            helper = lambda: launcher.replay()
                         else:
                             launcher.run(env=env, aslr=aslr, redirect=redirect)
                 except:
@@ -817,7 +815,7 @@ class Setup(AbstractContextManager):
                         sk.close()
                     raise
                 finally:
-                    if isinstance(redirect, socket):
+                    if redirect:
                         redirect.close()
 
             if connect:
@@ -843,10 +841,11 @@ class Setup(AbstractContextManager):
 
 
 class Net:
+    from socket import socket
     from ssl import SSLContext
 
     @staticmethod
-    def tcp(host: str, port: int, *, ssl: SSLContext | None = None) -> Tube:
+    def tcp(host: str, port: int, *, ssl: SSLContext | None = None) -> socket:
         from contextlib import suppress
         from socket import socket
         from time import sleep
@@ -864,13 +863,13 @@ class Net:
 
                 sleep(0.1)
 
-            return Socket(sk)
+            return sk
         except:
             sk.close()
             raise
 
     @staticmethod
-    def udp(host: str, port: int) -> Tube:
+    def udp(host: str, port: int) -> socket:
         from socket import socket, AF_INET, SOCK_DGRAM
 
         sk = socket(AF_INET, SOCK_DGRAM)
@@ -881,7 +880,7 @@ class Net:
             sk.close()
             raise
 
-        return Socket(sk)
+        return sk
 
     @staticmethod
     def SSLNoVerify() -> SSLContext:
@@ -977,8 +976,9 @@ def ud(data: bytes, *, byteorder: ByteOrder = 'little') -> int:
     return unpack(fmt[byteorder], data)[0]
 
 
-def block(size: int, *pair: tuple[int, bytes]) -> bytes:
-    dst = bytearray(size)
+def block(size: int, filler: bytes, *pair: tuple[int, bytes]) -> bytes:
+    assert (len(filler) == 1)
+    dst = bytearray(filler * size)
 
     for (i, src) in pair:
         assert (0 <= i <= i + len(src) <= size)
@@ -1003,3 +1003,20 @@ def rol64(value: int, n: int) -> int:
 
 def ror64(value: int, n: int) -> int:
     return rol64(value, -n)
+
+
+class Iota(bytearray):
+    def __init__(self):
+        from itertools import cycle
+        from string import digits, ascii_letters
+
+        super().__init__()
+        self.__seed: Iterator[bytes] = cycle(c.encode() for c in digits + ascii_letters)
+        self()
+
+    def __call__(self) -> Self:
+        self[:] = next(self.__seed)
+        return self
+
+
+iota: Iota = Iota()

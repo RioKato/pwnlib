@@ -57,7 +57,7 @@ def readelf(path: str) -> list[tuple[str, int]]:
 
     command = ['readelf', '-S', '-W', path]
     result = run(command, capture_output=True, text=True, check=True).stdout
-    pattern = r'^\s*\[\s*\d+\]\s+\.(\S+)\s+\S+\s+(\S+).*$'
+    pattern = r'\.(\S+).*?([0-9a-f]+)'
     return [(k, int(v, 16)) for k, v in findall(pattern, result, MULTILINE)]
 
 
