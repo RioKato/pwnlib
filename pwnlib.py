@@ -359,12 +359,12 @@ class Launcher:
 
     @staticmethod
     @contextmanager
-    def __pclose(popen: Popen) -> Iterator[None]:
+    def __pclose(popen: Popen) -> Iterator[Popen]:
         from subprocess import TimeoutExpired
 
         with popen:
             try:
-                yield
+                yield popen
             finally:
                 if popen.poll() is None:
                     popen.terminate()
@@ -379,29 +379,19 @@ class Launcher:
 
     @contextmanager
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[int]:
-        popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
-
-        with self.__pclose(popen):
+        with self.__pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as popen:
             yield popen.pid
 
     @contextmanager
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
-        popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
-
-        with self.__pclose(popen):
-            popen = self.executor.cli()
-
-            with self.__pclose(popen):
+        with self.__pclose(self.executor.debug(env=env, aslr=aslr, redirect=redirect)):
+            with self.__pclose(self.executor.cli()):
                 yield
 
     @contextmanager
     def attach(self, pid: int) -> Iterator[None]:
-        popen = self.executor.attach(pid)
-
-        with self.__pclose(popen):
-            popen = self.executor.cli()
-
-            with self.__pclose(popen):
+        with self.__pclose(self.executor.attach(pid)):
+            with self.__pclose(self.executor.cli()):
                 yield
 
     @contextmanager
@@ -413,18 +403,15 @@ class Launcher:
         popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
         try:
-            with self.__pclose(popen), suppress(StopRecording):
-                yield
+            with self.__pclose(popen):
+                with suppress(StopRecording):
+                    yield
         finally:
             if popen.returncode not in [0, -SIGINT, -SIGTERM]:
                 sleep(0.5)
 
-            popen = self.executor.replay()
-
-            with self.__pclose(popen):
-                popen = self.executor.cli()
-
-                with self.__pclose(popen):
+            with self.__pclose(self.executor.replay()):
+                with self.__pclose(self.executor.cli()):
                     sigwait([SIGINT])
 
     def replay(self):
