@@ -303,7 +303,8 @@ class Executor:
         start_new_session = trace
         preexec_fn = pr_set_ptracer_any if trace else None
         return Popen(command, stdin=stdin, stdout=stdout, stderr=stderr,
-                     start_new_session=start_new_session, preexec_fn=preexec_fn)
+                     process_group=0, start_new_session=start_new_session,
+                     preexec_fn=preexec_fn)
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Popen:
         from subprocess import DEVNULL
