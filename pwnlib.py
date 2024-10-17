@@ -357,7 +357,7 @@ class Executor:
         return self.__popen(command, False, None, None, None)
 
 
-class StopRecord(Exception):
+class StopRecording(Exception):
     pass
 
 
@@ -433,7 +433,7 @@ class Launcher(AbstractContextManager):
         pass
 
     def replay(self):
-        raise StopRecord
+        raise StopRecording
 
     def __enter__(self) -> Self:
         return self
