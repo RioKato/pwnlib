@@ -300,12 +300,9 @@ class Executor:
         def pr_set_ptracer_any():
             Glibc.prctl(Glibc.PR_SET_PTRACER, Glibc.PR_SET_PTRACER_ANY, 0, 0, 0)
 
-        start_new_session = trace
-        process_group = 0 if not trace else None
         preexec_fn = pr_set_ptracer_any if trace else None
         return Popen(command, stdin=stdin, stdout=stdout, stderr=stderr,
-                     start_new_session=start_new_session, process_group=process_group,
-                     preexec_fn=preexec_fn)
+                     process_group=0, preexec_fn=preexec_fn)
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Popen:
         from subprocess import DEVNULL
