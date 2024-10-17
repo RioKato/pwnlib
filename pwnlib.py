@@ -350,7 +350,7 @@ class StopRecording(Exception):
 
 
 @dataclass
-class Launcher(AbstractContextManager):
+class Launcher:
     from contextlib import contextmanager
     from socket import socket
     from subprocess import Popen
