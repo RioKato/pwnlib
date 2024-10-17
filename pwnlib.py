@@ -740,15 +740,13 @@ class Setup(AbstractContextManager):
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                         elif command.lookup(RR):
                             launcher.record(env=env, aslr=aslr, redirect=redirect)
+                            helper = lambda: launcher.replay()
                         else:
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                     else:
                         if command.lookup(GdbServer):
                             pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
                             helper = lambda: launcher.attach(pid)
-                        elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect)
-                            helper = lambda: launcher.replay()
                         else:
                             launcher.run(env=env, aslr=aslr, redirect=redirect)
                 except:

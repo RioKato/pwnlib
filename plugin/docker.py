@@ -8,7 +8,7 @@ class Docker(Outer):
     options: list[str] = field(default_factory=list)
     docker: str = 'docker'
     sh: str = 'sh'
-    pidfile: str = '/var/run/run.pid'
+    pidfile: str = '/var/run/pwnlib.pid'
 
     def __exec(self, inner: list[str], *args: str) -> list[str]:
         command = [self.docker, 'exec']
