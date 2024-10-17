@@ -406,11 +406,15 @@ class Launcher(AbstractContextManager):
 
         class Replay(AbstractContextManager):
             def __exit__(_self, *args) -> bool | None:
-                from signal import sigwait, SIGINT
+                from signal import sigwait, SIGINT, SIGTERM
+                from time import sleep
 
                 ignore = args[0] and issubclass(args[0], StopRecording)
                 args = args if not ignore else (None, None, None)
                 ignore = Pclose(popen).__exit__(*args) or ignore
+
+                if popen.returncode not in [0, -SIGINT, -SIGTERM]:
+                    sleep(0.5)
 
                 with Pclose(self.executor.replay()), Pclose(self.executor.cli()):
                     sigwait([SIGINT])
