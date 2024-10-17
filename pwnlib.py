@@ -425,7 +425,7 @@ class Launcher(AbstractContextManager):
             def __exit__(self, *args) -> bool | None:
                 from signal import sigwait, SIGINT
 
-                ignore = issubclass(args[0], StopRecording)
+                ignore = args[0] and issubclass(args[0], StopRecording)
                 args = args if not ignore else (None, None, None)
                 ignore = pclose.__exit__(*args) or ignore
 
@@ -761,7 +761,6 @@ class Setup(AbstractContextManager):
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                         elif command.lookup(RR):
                             launcher.record(env=env, aslr=aslr, redirect=redirect)
-                            helper = lambda: launcher.replay()
                         else:
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                     else:
