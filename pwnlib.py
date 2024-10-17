@@ -394,10 +394,6 @@ class Launcher(AbstractContextManager):
         self.executor = Executor(command)
         self.__estack: ExitStack = ExitStack()
 
-    def __cli(self):
-        popen = self.executor.cli()
-        self.__estack.enter_context(Pclose(popen))
-
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
         self.__estack.enter_context(Pclose(popen))
@@ -406,19 +402,21 @@ class Launcher(AbstractContextManager):
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
         self.__estack.enter_context(Pclose(popen))
-        self.__cli()
+        popen = self.executor.cli()
+        self.__estack.enter_context(Pclose(popen))
 
     def attach(self, pid: int):
         popen = self.executor.attach(pid)
         self.__estack.enter_context(Pclose(popen))
-        self.__cli()
+        popen = self.executor.cli()
+        self.__estack.enter_context(Pclose(popen))
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
         pclose = Pclose(popen)
         executor = self.executor
 
-        class Record(AbstractContextManager):
+        class Replay(AbstractContextManager):
             def __enter__(self) -> Self:
                 return self
 
@@ -437,8 +435,8 @@ class Launcher(AbstractContextManager):
 
                 return ignore
 
-        record = Record()
-        self.__estack.enter_context(record)
+        replay = Replay()
+        self.__estack.enter_context(replay)
 
     def replay(self):
         raise StopRecording
