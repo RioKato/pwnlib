@@ -46,22 +46,3 @@ class Docker(Outer):
     def replay(self) -> list[str]:
         command = self.command.replay()
         return self.__exec(command)
-
-
-def __swap_record():
-    from pwnlib import Context
-    from socket import socket
-
-    record = Context.record
-
-    def __record(self: Context, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        from time import sleep
-
-        callback = lambda: sleep(0.5)
-        self.atexit(callback)
-        record(self, env=env, aslr=aslr, redirect=redirect)
-
-    Context.record = __record
-
-
-__swap_record()
