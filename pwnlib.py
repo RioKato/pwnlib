@@ -358,7 +358,7 @@ class Executor:
 
 
 @dataclass
-class Context(AbstractContextManager):
+class Launcher(AbstractContextManager):
     from socket import socket
     from subprocess import Popen
 
@@ -405,6 +405,10 @@ class Context(AbstractContextManager):
         self.__estack.enter_context(popen)
         self.__estack.callback(callback)
 
+    def __cli(self):
+        popen = self.executor.cli()
+        self.__pclose(popen)
+
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
@@ -413,78 +417,26 @@ class Context(AbstractContextManager):
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
         self.__pclose(popen)
+        self.__cli()
 
     def attach(self, pid: int):
         popen = self.executor.attach(pid)
         self.__pclose(popen)
+        self.__cli()
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
-        self.__pclose(popen)
+        # TODO: create context
+        pass
 
     def replay(self):
-        popen = self.executor.replay()
-        self.__pclose(popen)
-
-    def cli(self):
-        popen = self.executor.cli()
-        self.__pclose(popen)
-
-    def kill(self):
-        self.__estack.pop_all().close()
-
-    def atexit(self, callback: Callable[[], None]):
-        self.__estack.callback(callback)
+        # TODO: throw exceptino
+        pass
 
     def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args) -> bool | None:
         return self.__estack.__exit__(*args)
-
-
-@dataclass
-class Launcher(AbstractContextManager):
-    from socket import socket
-
-    context: Context
-
-    def __init__(self, command: Command):
-        self.context = Context(command)
-
-    def __replay(self):
-        from signal import sigwait, SIGINT
-
-        self.context.replay()
-        self.context.cli()
-        sigwait([SIGINT])
-
-    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
-        return self.context.run(env=env, aslr=aslr, redirect=redirect)
-
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        self.context.debug(env=env, aslr=aslr, redirect=redirect)
-        self.context.cli()
-
-    def attach(self, pid: int):
-        self.context.attach(pid)
-        self.context.cli()
-
-    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None, replay: bool = True):
-        if replay:
-            self.context.atexit(self.__replay)
-
-        self.context.record(env=env, aslr=aslr, redirect=redirect)
-
-    def replay(self):
-        self.context.kill()
-        self.__replay()
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *args) -> bool | None:
-        return self.context.__exit__(*args)
 
 
 class Hexdump:
@@ -797,7 +749,8 @@ class Setup(AbstractContextManager):
                         if command.lookup(GdbServer):
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                         elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect, replay=True)
+                            launcher.record(env=env, aslr=aslr, redirect=redirect)
+                            helper = lambda: launcher.replay()
                         else:
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                     else:
@@ -805,7 +758,7 @@ class Setup(AbstractContextManager):
                             pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
                             helper = lambda: launcher.attach(pid)
                         elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect, replay=False)
+                            launcher.record(env=env, aslr=aslr, redirect=redirect)
                             helper = lambda: launcher.replay()
                         else:
                             launcher.run(env=env, aslr=aslr, redirect=redirect)
