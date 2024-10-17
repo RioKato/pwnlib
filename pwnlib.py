@@ -357,6 +357,10 @@ class Executor:
         return self.__popen(command, False, None, None, None)
 
 
+class StopRecord(Exception):
+    pass
+
+
 @dataclass
 class Launcher(AbstractContextManager):
     from socket import socket
@@ -429,8 +433,7 @@ class Launcher(AbstractContextManager):
         pass
 
     def replay(self):
-        # TODO: throw exceptino
-        pass
+        raise StopRecord
 
     def __enter__(self) -> Self:
         return self
