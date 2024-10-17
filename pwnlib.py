@@ -345,37 +345,34 @@ class Executor:
         return self.__popen(command, False, None, None, None)
 
 
-class Pclose(AbstractContextManager):
-    from subprocess import Popen
-
-    def __init__(self, popen: Popen):
-        from subprocess import Popen
-
-        self.__popen: Popen = popen
-
-    def __exit__(self, *args) -> bool | None:
-        from subprocess import TimeoutExpired
-
-        if self.__popen.poll() is None:
-            self.__popen.terminate()
-
-            try:
-                self.__popen.wait(1)
-            except TimeoutExpired:
-                self.__popen.kill()
-
-        return self.__popen.__exit__(*args)
-
-
 class StopRecording(Exception):
     pass
 
 
 @dataclass
 class Launcher(AbstractContextManager):
+    from contextlib import contextmanager
     from socket import socket
+    from subprocess import Popen
 
     executor: Executor
+
+    @staticmethod
+    @contextmanager
+    def __pclose(popen: Popen) -> Iterator[None]:
+        from subprocess import TimeoutExpired
+
+        with popen:
+            try:
+                yield
+            finally:
+                if popen.poll() is None:
+                    popen.terminate()
+
+                    try:
+                        popen.wait(1)
+                    except TimeoutExpired:
+                        popen.kill()
 
     def __init__(self, command: Command):
         from contextlib import ExitStack
@@ -385,20 +382,20 @@ class Launcher(AbstractContextManager):
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
-        self.__estack.enter_context(Pclose(popen))
+        self.__estack.enter_context(self.__pclose(popen))
         return popen.pid
 
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
-        self.__estack.enter_context(Pclose(popen))
+        self.__estack.enter_context(self.__pclose(popen))
         popen = self.executor.cli()
-        self.__estack.enter_context(Pclose(popen))
+        self.__estack.enter_context(self.__pclose(popen))
 
     def attach(self, pid: int):
         popen = self.executor.attach(pid)
-        self.__estack.enter_context(Pclose(popen))
+        self.__estack.enter_context(self.__pclose(popen))
         popen = self.executor.cli()
-        self.__estack.enter_context(Pclose(popen))
+        self.__estack.enter_context(self.__pclose(popen))
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         from contextlib import suppress, contextmanager
@@ -410,7 +407,7 @@ class Launcher(AbstractContextManager):
             popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
             try:
-                with Pclose(popen), suppress(StopRecording):
+                with self.__pclose(popen), suppress(StopRecording):
                     yield
             finally:
                 if popen.returncode not in [0, -SIGINT, -SIGTERM]:
@@ -418,10 +415,10 @@ class Launcher(AbstractContextManager):
 
                 popen = self.executor.replay()
 
-                with Pclose(popen):
+                with self.__pclose(popen):
                     popen = self.executor.cli()
 
-                    with Pclose(popen):
+                    with self.__pclose(popen):
                         sigwait([SIGINT])
 
         self.__estack.enter_context(rr())
