@@ -369,6 +369,9 @@ class Pclose(AbstractContextManager):
 
         self.__popen.kill()
 
+    def __enter__(self) -> Self:
+        return self
+
     def __exit__(self, *args) -> bool | None:
         self.__pkill()
         self.__popen.__exit__(*args)
