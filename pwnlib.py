@@ -355,19 +355,16 @@ class Pclose(AbstractContextManager):
         self.__popen: Popen = popen
 
     def __exit__(self, *args) -> bool | None:
-        from contextlib import suppress
         from subprocess import TimeoutExpired
 
-        if self.__popen.poll() is not None:
-            return
+        if self.__popen.poll() is None:
+            self.__popen.terminate()
 
-        self.__popen.terminate()
+            try:
+                self.__popen.wait(1)
+            except TimeoutExpired:
+                self.__popen.kill()
 
-        with suppress(TimeoutExpired):
-            self.__popen.wait(1)
-            return
-
-        self.__popen.kill()
         return self.__popen.__exit__(*args)
 
 
