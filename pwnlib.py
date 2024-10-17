@@ -414,8 +414,31 @@ class Launcher(AbstractContextManager):
         self.__cli()
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        # TODO: create context
-        pass
+        popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
+        pclose = Pclose(popen)
+        executor = self.executor
+
+        class Record(AbstractContextManager):
+            def __enter__(self) -> Self:
+                return self
+
+            def __exit__(self, *args) -> bool | None:
+                from signal import sigwait, SIGINT
+
+                ignore = issubclass(args[0], StopRecording)
+                args = args if not ignore else (None, None, None)
+                ignore = pclose.__exit__(*args) or ignore
+
+                popen = executor.replay()
+                with Pclose(popen):
+                    popen = executor.cli()
+                    with Pclose(popen):
+                        sigwait([SIGINT])
+
+                return ignore
+
+        record = Record()
+        self.__estack.enter_context(record)
 
     def replay(self):
         raise StopRecording
