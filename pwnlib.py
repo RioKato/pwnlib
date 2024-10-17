@@ -418,8 +418,7 @@ class Launcher(AbstractContextManager):
 
                 return ignore
 
-        replay = Replay()
-        self.__estack.enter_context(replay)
+        self.__estack.enter_context(Replay())
 
     def replay(self):
         raise StopRecording
