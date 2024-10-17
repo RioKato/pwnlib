@@ -37,17 +37,6 @@ class Color:
     WHITE: str = __ansi('\033[37m')
 
 
-class Developer:
-    enable: bool = False
-
-    @classmethod
-    def print(cls, message: str):
-        from sys import stderr
-
-        if cls.enable:
-            print(f'{Color.RED}[DEV]{Color.END} {message}', file=stderr, flush=True)
-
-
 @dataclass
 class Alias:
     env: str = 'env'
@@ -357,6 +346,34 @@ class Executor:
         return self.__popen(command, False, None, None, None)
 
 
+class Pclose(AbstractContextManager):
+    from subprocess import Popen
+
+    def __init__(self, popen: Popen):
+        from subprocess import Popen
+
+        self.__popen: Popen = popen
+
+    def __pkill(self):
+        from contextlib import suppress
+        from subprocess import TimeoutExpired
+
+        if self.__popen.poll() is not None:
+            return
+
+        self.__popen.terminate()
+
+        with suppress(TimeoutExpired):
+            self.__popen.wait(1)
+            return
+
+        self.__popen.kill()
+
+    def __exit__(self, *args) -> bool | None:
+        self.__pkill()
+        self.__popen.__exit__(*args)
+
+
 class StopRecording(Exception):
     pass
 
@@ -374,58 +391,23 @@ class Launcher(AbstractContextManager):
         self.executor = Executor(command)
         self.__estack: ExitStack = ExitStack()
 
-    def __pclose(self, popen: Popen):
-        from contextlib import suppress
-        from subprocess import TimeoutExpired
-
-        if Developer.enable:
-            def callback():
-                from signal import Signals
-
-                code = popen.returncode
-
-                if code >= 0:
-                    reason = f'pid={popen.pid}, code={code}'
-                else:
-                    name = Signals(-code).name
-                    reason = f'pid={popen.pid}, signal={name}'
-
-                Developer.print(f'The process has terminated ({reason})')
-
-            self.__estack.callback(callback)
-
-        def callback():
-            if popen.poll() is not None:
-                return
-
-            popen.terminate()
-
-            with suppress(TimeoutExpired):
-                popen.wait(1)
-                return
-
-            popen.kill()
-
-        self.__estack.enter_context(popen)
-        self.__estack.callback(callback)
-
     def __cli(self):
         popen = self.executor.cli()
-        self.__pclose(popen)
+        self.__estack.enter_context(Pclose(popen))
 
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
-        self.__pclose(popen)
+        self.__estack.enter_context(Pclose(popen))
         return popen.pid
 
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
-        self.__pclose(popen)
+        self.__estack.enter_context(Pclose(popen))
         self.__cli()
 
     def attach(self, pid: int):
         popen = self.executor.attach(pid)
-        self.__pclose(popen)
+        self.__estack.enter_context(Pclose(popen))
         self.__cli()
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
