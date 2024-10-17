@@ -374,7 +374,7 @@ class Pclose(AbstractContextManager):
 
     def __exit__(self, *args) -> bool | None:
         self.__pkill()
-        self.__popen.__exit__(*args)
+        return self.__popen.__exit__(*args)
 
 
 class StopRecording(Exception):
