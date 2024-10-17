@@ -401,26 +401,30 @@ class Launcher(AbstractContextManager):
         self.__estack.enter_context(Pclose(popen))
 
     def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
+        from contextlib import suppress, contextmanager
+        from signal import sigwait, SIGINT, SIGTERM
+        from time import sleep
 
-        class Replay(AbstractContextManager):
-            def __exit__(_self, *args) -> bool | None:
-                from signal import sigwait, SIGINT, SIGTERM
-                from time import sleep
+        @contextmanager
+        def rr():
+            popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
-                ignore = args[0] and issubclass(args[0], StopRecording)
-                args = args if not ignore else (None, None, None)
-                ignore = Pclose(popen).__exit__(*args) or ignore
-
+            try:
+                with Pclose(popen), suppress(StopRecording):
+                    yield
+            finally:
                 if popen.returncode not in [0, -SIGINT, -SIGTERM]:
                     sleep(0.5)
 
-                with Pclose(self.executor.replay()), Pclose(self.executor.cli()):
-                    sigwait([SIGINT])
+                popen = self.executor.replay()
 
-                return ignore
+                with Pclose(popen):
+                    popen = self.executor.cli()
 
-        self.__estack.enter_context(Replay())
+                    with Pclose(popen):
+                        sigwait([SIGINT])
+
+        self.__estack.enter_context(rr())
 
     def replay(self):
         raise StopRecording
