@@ -375,7 +375,6 @@ class StopRecording(Exception):
 @dataclass
 class Launcher(AbstractContextManager):
     from socket import socket
-    from subprocess import Popen
 
     executor: Executor
 
