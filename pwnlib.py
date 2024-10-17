@@ -406,7 +406,7 @@ class Launcher(AbstractContextManager):
         from time import sleep
 
         @contextmanager
-        def rr():
+        def rr() -> Iterator[None]:
             popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
             try:
