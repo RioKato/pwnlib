@@ -375,59 +375,60 @@ class Launcher(AbstractContextManager):
                         popen.kill()
 
     def __init__(self, command: Command):
-        from contextlib import ExitStack
-
         self.executor = Executor(command)
-        self.__estack: ExitStack = ExitStack()
 
-    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> int:
+    @contextmanager
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[int]:
         popen = self.executor.run(env=env, aslr=aslr, redirect=redirect)
-        self.__estack.enter_context(self.__pclose(popen))
-        return popen.pid
 
-    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
+        with self.__pclose(popen):
+            yield popen.pid
+
+    @contextmanager
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
         popen = self.executor.debug(env=env, aslr=aslr, redirect=redirect)
-        self.__estack.enter_context(self.__pclose(popen))
-        popen = self.executor.cli()
-        self.__estack.enter_context(self.__pclose(popen))
 
-    def attach(self, pid: int):
+        with self.__pclose(popen):
+            popen = self.executor.cli()
+
+            with self.__pclose(popen):
+                yield
+
+    @contextmanager
+    def attach(self, pid: int) -> Iterator[None]:
         popen = self.executor.attach(pid)
-        self.__estack.enter_context(self.__pclose(popen))
-        popen = self.executor.cli()
-        self.__estack.enter_context(self.__pclose(popen))
 
-    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None):
-        from contextlib import suppress, contextmanager
+        with self.__pclose(popen):
+            popen = self.executor.cli()
+
+            with self.__pclose(popen):
+                yield
+
+    @contextmanager
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
+        from contextlib import suppress
         from signal import sigwait, SIGINT, SIGTERM
         from time import sleep
 
-        @contextmanager
-        def rr() -> Iterator[None]:
-            popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
+        popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
-            try:
-                with self.__pclose(popen), suppress(StopRecording):
-                    yield
-            finally:
-                if popen.returncode not in [0, -SIGINT, -SIGTERM]:
-                    sleep(0.5)
+        try:
+            with self.__pclose(popen), suppress(StopRecording):
+                yield
+        finally:
+            if popen.returncode not in [0, -SIGINT, -SIGTERM]:
+                sleep(0.5)
 
-                popen = self.executor.replay()
+            popen = self.executor.replay()
+
+            with self.__pclose(popen):
+                popen = self.executor.cli()
 
                 with self.__pclose(popen):
-                    popen = self.executor.cli()
-
-                    with self.__pclose(popen):
-                        sigwait([SIGINT])
-
-        self.__estack.enter_context(rr())
+                    sigwait([SIGINT])
 
     def replay(self):
         raise StopRecording
-
-    def __exit__(self, *args) -> bool | None:
-        return self.__estack.__exit__(*args)
 
 
 class Hexdump:
