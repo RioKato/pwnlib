@@ -369,9 +369,6 @@ class Pclose(AbstractContextManager):
 
         self.__popen.kill()
 
-    def __enter__(self) -> Self:
-        return self
-
     def __exit__(self, *args) -> bool | None:
         self.__pkill()
         return self.__popen.__exit__(*args)
@@ -415,9 +412,6 @@ class Launcher(AbstractContextManager):
         popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
         class Replay(AbstractContextManager):
-            def __enter__(self) -> Self:
-                return self
-
             def __exit__(_self, *args) -> bool | None:
                 from signal import sigwait, SIGINT
 
@@ -435,9 +429,6 @@ class Launcher(AbstractContextManager):
 
     def replay(self):
         raise StopRecording
-
-    def __enter__(self) -> Self:
-        return self
 
     def __exit__(self, *args) -> bool | None:
         return self.__estack.__exit__(*args)
