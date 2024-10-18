@@ -732,7 +732,8 @@ class Setup(AbstractContextManager):
                             estack.enter_context(context)
                             helper = launcher.replay
                         else:
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                            context = launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                            estack.enter_context(context)
                     else:
                         if command.lookup(GdbServer):
                             context = launcher.run(env=env, aslr=aslr, redirect=redirect)
