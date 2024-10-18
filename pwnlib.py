@@ -720,9 +720,9 @@ class Setup(AbstractContextManager):
                 sk, redirect = socketpair()
 
             if command:
-                launcher = Launcher(command)
-
                 try:
+                    launcher = Launcher(command)
+
                     if debug:
                         if command.lookup(GdbServer):
                             context = launcher.debug(env=env, aslr=aslr, redirect=redirect)
