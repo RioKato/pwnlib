@@ -576,17 +576,17 @@ class Proxy(Process, AbstractContextManager):
         self.__buffer: bytes = b''
 
     def run(self):
-        from contextlib import suppress
+        from contextlib import suppress, closing
         from os import setpgid
 
         setpgid(0, 0)
 
-        with suppress(Exception):
-            while data := self.__socket.recv(0x1000):
-                self.__queue.put(data)
+        with closing(self.__socket):
+            with suppress(Exception):
+                while data := self.__socket.recv(0x1000):
+                    self.__queue.put(data)
 
-        self.__queue.put(b'')
-        self.__socket.close()
+            self.__queue.put(b'')
 
     def stop(self):
         if self.is_alive():
