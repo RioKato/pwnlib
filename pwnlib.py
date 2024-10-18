@@ -721,23 +721,29 @@ class Setup(AbstractContextManager):
 
             if command:
                 launcher = Launcher(command)
-                estack.enter_context(launcher)
 
                 try:
                     if debug:
                         if command.lookup(GdbServer):
-                            launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                            context = launcher.debug(env=env, aslr=aslr, redirect=redirect)
+                            estack.enter_context(context)
                         elif command.lookup(RR):
-                            launcher.record(env=env, aslr=aslr, redirect=redirect)
-                            helper = lambda: launcher.replay()
+                            context = launcher.record(env=env, aslr=aslr, redirect=redirect)
+                            estack.enter_context(context)
+                            helper = launcher.replay
                         else:
                             launcher.debug(env=env, aslr=aslr, redirect=redirect)
                     else:
                         if command.lookup(GdbServer):
-                            pid = launcher.run(env=env, aslr=aslr, redirect=redirect)
-                            helper = lambda: launcher.attach(pid)
+                            context = launcher.run(env=env, aslr=aslr, redirect=redirect)
+                            pid = estack.enter_context(context)
+
+                            def helper():
+                                context = launcher.attach(pid)
+                                estack.enter_context(context)
                         else:
-                            launcher.run(env=env, aslr=aslr, redirect=redirect)
+                            context = launcher.run(env=env, aslr=aslr, redirect=redirect)
+                            estack.enter_context(context)
                 except:
                     if sk:
                         sk.close()
