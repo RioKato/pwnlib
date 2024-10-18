@@ -1,7 +1,8 @@
 from typing import IO, Callable, Iterator, Literal, Self, cast
 from abc import ABCMeta, abstractmethod
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
+from subprocess import Popen
 from multiprocessing import Process
 
 __all__ = [
@@ -345,6 +346,23 @@ class Executor:
         return self.__popen(command, False, None, None, None)
 
 
+@contextmanager
+def pclose(popen: Popen) -> Iterator[Popen]:
+    from subprocess import TimeoutExpired
+
+    with popen:
+        try:
+            yield popen
+        finally:
+            if popen.poll() is None:
+                popen.terminate()
+
+                try:
+                    popen.wait(1)
+                except TimeoutExpired:
+                    popen.kill()
+
+
 class StopRecording(Exception):
     pass
 
@@ -357,41 +375,24 @@ class Launcher:
 
     executor: Executor
 
-    @staticmethod
-    @contextmanager
-    def __pclose(popen: Popen) -> Iterator[Popen]:
-        from subprocess import TimeoutExpired
-
-        with popen:
-            try:
-                yield popen
-            finally:
-                if popen.poll() is None:
-                    popen.terminate()
-
-                    try:
-                        popen.wait(1)
-                    except TimeoutExpired:
-                        popen.kill()
-
     def __init__(self, command: Command):
         self.executor = Executor(command)
 
     @contextmanager
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[int]:
-        with self.__pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as popen:
+        with pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as popen:
             yield popen.pid
 
     @contextmanager
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
-        with self.__pclose(self.executor.debug(env=env, aslr=aslr, redirect=redirect)):
-            with self.__pclose(self.executor.cli()):
+        with pclose(self.executor.debug(env=env, aslr=aslr, redirect=redirect)):
+            with pclose(self.executor.cli()):
                 yield
 
     @contextmanager
     def attach(self, pid: int) -> Iterator[None]:
-        with self.__pclose(self.executor.attach(pid)):
-            with self.__pclose(self.executor.cli()):
+        with pclose(self.executor.attach(pid)):
+            with pclose(self.executor.cli()):
                 yield
 
     @contextmanager
@@ -403,15 +404,15 @@ class Launcher:
         popen = self.executor.record(env=env, aslr=aslr, redirect=redirect)
 
         try:
-            with self.__pclose(popen):
+            with pclose(popen):
                 with suppress(StopRecording):
                     yield
         finally:
             if popen.returncode not in [0, -SIGINT, -SIGTERM]:
                 sleep(0.5)
 
-            with self.__pclose(self.executor.replay()):
-                with self.__pclose(self.executor.cli()):
+            with pclose(self.executor.replay()):
+                with pclose(self.executor.cli()):
                     sigwait([SIGINT])
 
     def replay(self):
