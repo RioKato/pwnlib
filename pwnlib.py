@@ -724,8 +724,8 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
             return
 
         case (command, None):
-            socket, redirect = socketpair()
             launch = Launcher.debug if debug else Launcher.run
+            socket, redirect = socketpair()
 
             with socket, redirect:
                 with Proxy(socket, verbose=verbose) as proxy:
