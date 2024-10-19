@@ -368,21 +368,6 @@ def pclose(popen: Popen) -> Iterator[Popen]:
     if popen.returncode not in [0, -SIGTERM, -SIGKILL]:
         sleep(0.5)
 
-    if True:
-        from sys import stderr
-        from signal import Signals
-
-        code = popen.returncode
-
-        if code >= 0:
-            reason = f'pid={popen.pid}, code={code}'
-        else:
-            signal = Signals(-code).name
-            reason = f'pid={popen.pid}, signal={signal}'
-
-        message = f'{Color.RED}[DEBUG]{Color.END} process has terminated({reason})'
-        print(message, file=stderr)
-
 
 class StopRecording(Exception):
     pass
