@@ -721,37 +721,32 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
         if command:
             if debug:
                 with Launcher.debug(command, env=env, aslr=aslr, redirect=None) as helper:
-                    socket = connect()
-
-                    with Proxy(socket, verbose=verbose) as proxy:
+                    with Proxy(connect(), verbose=verbose) as proxy:
                         yield (proxy, helper)
             else:
                 with Launcher.run(command, env=env, aslr=aslr, redirect=None) as helper:
-                    socket = connect()
-
-                    with Proxy(socket, verbose=verbose) as proxy:
+                    with Proxy(connect(), verbose=verbose) as proxy:
                         yield (proxy, helper)
         else:
-            socket = connect()
-
-            with Proxy(socket, verbose=verbose) as proxy:
+            with Proxy(connect(), verbose=verbose) as proxy:
                 yield (proxy, lambda: None)
 
     else:
         assert (command)
         socket, redirect = socketpair()
 
-        with Proxy(socket, verbose=verbose) as proxy:
-            if debug:
-                with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
-                    redirect.close()
+        with socket, redirect:
+            with Proxy(socket, verbose=verbose) as proxy:
+                if debug:
+                    with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                        redirect.close()
 
-                    yield (proxy, helper)
-            else:
-                with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
-                    redirect.close()
+                        yield (proxy, helper)
+                else:
+                    with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                        redirect.close()
 
-                    yield (proxy, helper)
+                        yield (proxy, helper)
 
 
 class Net:
