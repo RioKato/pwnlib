@@ -736,12 +736,13 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
         socket, redirect = socketpair()
 
         with socket, redirect:
-            with Proxy(socket, verbose=verbose) as proxy:
-                if debug:
+            if debug:
+                with Proxy(socket, verbose=verbose) as proxy:
                     with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
                         yield (proxy, helper)
-                else:
+            else:
+                with Proxy(socket, verbose=verbose) as proxy:
                     with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
                         yield (proxy, helper)
