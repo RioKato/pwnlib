@@ -480,7 +480,7 @@ class Hexdump:
         while data:
             fst, snd, data = data[:8], data[8:16], data[16:]
             left, middle, right = dumpq(fst), dumpq(snd), dumps(fst + snd)
-            yield f'{Color.CYAN}[{offset:04x}]{Color.END} {left} {middle} {right}'
+            yield f'{Color.CYAN}[{offset:03x}]{Color.END} {left} {middle} {right}'
             offset += 0x10
 
     @staticmethod
