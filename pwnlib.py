@@ -705,6 +705,7 @@ class Proxy(Process, AbstractContextManager):
 
     def interactive(self):
         from contextlib import suppress
+        import readline
 
         with suppress(KeyboardInterrupt):
             while True:
