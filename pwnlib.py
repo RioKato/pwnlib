@@ -7,12 +7,11 @@ from multiprocessing import Process
 
 __all__ = [
     'Alias', 'Target', 'GdbServer', 'RR', 'Tmux', 'Display',
-    'setup', 'Net',
+    'setup',
     'p8', 'p16', 'p32', 'p64', 'pf', 'pd',
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
-    'block',
+    'block', 'iota',
     'rol64', 'ror64',
-    'iota'
 ]
 
 
@@ -730,58 +729,6 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
                     yield (proxy, helper)
 
 
-class Net:
-    from socket import socket
-    from ssl import SSLContext
-
-    @staticmethod
-    def tcp(host: str, port: int, *, ssl: SSLContext | None = None) -> socket:
-        from contextlib import suppress
-        from socket import socket
-        from time import sleep
-
-        sk = socket()
-
-        try:
-            if ssl:
-                sk = ssl.wrap_socket(sk)
-
-            while True:
-                with suppress(ConnectionRefusedError):
-                    sk.connect((host, port))
-                    break
-
-                sleep(0.1)
-
-            return sk
-        except:
-            sk.close()
-            raise
-
-    @staticmethod
-    def udp(host: str, port: int) -> socket:
-        from socket import socket, AF_INET, SOCK_DGRAM
-
-        sk = socket(AF_INET, SOCK_DGRAM)
-
-        try:
-            sk.connect((host, port))
-        except:
-            sk.close()
-            raise
-
-        return sk
-
-    @staticmethod
-    def SSLNoVerify() -> SSLContext:
-        from ssl import SSLContext, PROTOCOL_TLS_CLIENT, CERT_NONE
-
-        ssl = SSLContext(PROTOCOL_TLS_CLIENT)
-        ssl.check_hostname = False
-        ssl.verify_mode = CERT_NONE
-        return ssl
-
-
 class Limit:
     INT8_MIN: int = -(1 << 7)
     INT16_MIN: int = -(1 << 15)
@@ -877,6 +824,23 @@ def block(size: int, filler: bytes, *pair: tuple[int, bytes]) -> bytes:
     return bytes(dst)
 
 
+class Iota(bytearray):
+    def __init__(self):
+        from itertools import cycle
+        from string import digits, ascii_letters
+
+        super().__init__()
+        self.__seed: Iterator[bytes] = cycle(c.encode() for c in digits + ascii_letters)
+        self()
+
+    def __call__(self) -> Self:
+        self[:] = next(self.__seed)
+        return self
+
+
+iota: Iota = Iota()
+
+
 def rol64(value: int, n: int) -> int:
     assert (Limit.INT64_MIN <= value <= Limit.UINT64_MAX)
     assert (-63 <= n <= 63)
@@ -893,20 +857,3 @@ def rol64(value: int, n: int) -> int:
 
 def ror64(value: int, n: int) -> int:
     return rol64(value, -n)
-
-
-class Iota(bytearray):
-    def __init__(self):
-        from itertools import cycle
-        from string import digits, ascii_letters
-
-        super().__init__()
-        self.__seed: Iterator[bytes] = cycle(c.encode() for c in digits + ascii_letters)
-        self()
-
-    def __call__(self) -> Self:
-        self[:] = next(self.__seed)
-        return self
-
-
-iota: Iota = Iota()
