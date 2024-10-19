@@ -740,12 +740,10 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
                 if debug:
                     with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
-
                         yield (proxy, helper)
                 else:
                     with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
-
                         yield (proxy, helper)
 
 
