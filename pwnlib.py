@@ -618,10 +618,10 @@ class Proxy(Process, AbstractContextManager):
             raise EOFError
 
         block = bool(timeout)
-        timeout = timeout if timeout > 0 else None  # type:ignore
+        timeout_ = timeout if timeout > 0 else None
 
         try:
-            if data := self.__queue.get(block=block, timeout=timeout):
+            if data := self.__queue.get(block=block, timeout=timeout_):
                 return data
             else:
                 self.__eof = True
