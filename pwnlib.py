@@ -718,38 +718,29 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
     from socket import socketpair
     assert (command or connect)
 
-    match (command, connect, debug):
-        case (command, None, False):
-            assert (command)
+    match (command, connect):
+        case (None, None):
+            # unreachable
+            return
+
+        case (command, None):
             socket, redirect = socketpair()
+            launch = Launcher.debug if debug else Launcher.run
 
             with socket, redirect:
                 with Proxy(socket, verbose=verbose) as proxy:
-                    with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                    with launch(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
                         yield (proxy, helper)
 
-        case (command, None, True):
-            assert (command)
-            socket, redirect = socketpair()
-
-            with socket, redirect:
-                with Proxy(socket, verbose=verbose) as proxy:
-                    with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
-                        redirect.close()
-                        yield (proxy, helper)
-
-        case (None, connect, _):
+        case (None, connect):
             with Proxy(connect(), verbose=verbose) as proxy:
                 yield (proxy, lambda: None)
 
-        case (command, connect, False):
-            with Launcher.run(command, env=env, aslr=aslr, redirect=None) as helper:
-                with Proxy(connect(), verbose=verbose) as proxy:
-                    yield (proxy, helper)
+        case (command, connect):
+            launch = Launcher.debug if debug else Launcher.run
 
-        case (command, connect, True):
-            with Launcher.debug(command, env=env, aslr=aslr, redirect=None) as helper:
+            with launch(command, env=env, aslr=aslr, redirect=None) as helper:
                 with Proxy(connect(), verbose=verbose) as proxy:
                     yield (proxy, helper)
 
