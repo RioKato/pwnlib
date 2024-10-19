@@ -576,17 +576,16 @@ class Proxy(Process, AbstractContextManager):
         self.__buffer: bytes = b''
 
     def run(self):
-        from contextlib import suppress, closing
+        from contextlib import suppress
         from os import setpgid
 
         setpgid(0, 0)
 
-        with closing(self.__socket):
-            with suppress(Exception):
-                while data := self.__socket.recv(0x1000):
-                    self.__queue.put(data)
+        with suppress(Exception):
+            while data := self.__socket.recv(0x1000):
+                self.__queue.put(data)
 
-            self.__queue.put(b'')
+        self.__queue.put(b'')
 
     def stop(self):
         if self.is_alive():
@@ -594,6 +593,8 @@ class Proxy(Process, AbstractContextManager):
 
         self.join()
         self.close()
+        self.__socket.close()
+        self.__queue.close()
 
     def __enter__(self) -> Self:
         self.start()
@@ -716,7 +717,7 @@ class Setup(AbstractContextManager):
 
     def __init__(self, command: Command | None, connect: Callable[[], Socket] | None, debug: bool, *,
                  env: dict[str, str] = {}, aslr: bool = True, verbose: int = 1):
-        from contextlib import ExitStack, closing
+        from contextlib import ExitStack
         from socket import socketpair
 
         assert (command or connect)
@@ -729,7 +730,6 @@ class Setup(AbstractContextManager):
                 socket, redirect = None, None
             else:
                 socket, redirect = socketpair()
-                estack.enter_context(socket)
 
             if command:
                 try:
@@ -745,10 +745,8 @@ class Setup(AbstractContextManager):
 
             if connect:
                 socket = connect()
-                estack.enter_context(closing(socket))
-            else:
-                assert (socket)
 
+            assert (socket)
             proxy = Proxy(socket, verbose=verbose)
             estack.enter_context(proxy)
             self.__estack: ExitStack = estack
