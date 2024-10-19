@@ -720,8 +720,7 @@ def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: 
 
     match (command, connect):
         case (None, None):
-            # unreachable
-            return
+            pass
 
         case (command, None):
             launch = Launcher.debug if debug else Launcher.run
