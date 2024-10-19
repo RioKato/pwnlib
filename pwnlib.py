@@ -716,36 +716,42 @@ class Proxy(Process, AbstractContextManager):
 def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: bool, *,
           env: dict[str, str] = {}, aslr: bool = True, verbose: int = 1) -> Iterator[tuple[Proxy, Callable[[], None]]]:
     from socket import socketpair
+    assert (command or connect)
 
-    if connect:
-        if command:
-            if debug:
-                with Launcher.debug(command, env=env, aslr=aslr, redirect=None) as helper:
-                    with Proxy(connect(), verbose=verbose) as proxy:
-                        yield (proxy, helper)
-            else:
-                with Launcher.run(command, env=env, aslr=aslr, redirect=None) as helper:
-                    with Proxy(connect(), verbose=verbose) as proxy:
-                        yield (proxy, helper)
-        else:
-            with Proxy(connect(), verbose=verbose) as proxy:
-                yield (proxy, lambda: None)
+    match (command, connect, debug):
+        case (command, None, False):
+            assert (command)
+            socket, redirect = socketpair()
 
-    else:
-        assert (command)
-        socket, redirect = socketpair()
-
-        with socket, redirect:
-            if debug:
-                with Proxy(socket, verbose=verbose) as proxy:
-                    with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
-                        redirect.close()
-                        yield (proxy, helper)
-            else:
+            with socket, redirect:
                 with Proxy(socket, verbose=verbose) as proxy:
                     with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
                         redirect.close()
                         yield (proxy, helper)
+
+        case (command, None, True):
+            assert (command)
+            socket, redirect = socketpair()
+
+            with socket, redirect:
+                with Proxy(socket, verbose=verbose) as proxy:
+                    with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                        redirect.close()
+                        yield (proxy, helper)
+
+        case (None, connect, _):
+            with Proxy(connect(), verbose=verbose) as proxy:
+                yield (proxy, lambda: None)
+
+        case (command, connect, False):
+            with Launcher.run(command, env=env, aslr=aslr, redirect=None) as helper:
+                with Proxy(connect(), verbose=verbose) as proxy:
+                    yield (proxy, helper)
+
+        case (command, connect, True):
+            with Launcher.debug(command, env=env, aslr=aslr, redirect=None) as helper:
+                with Proxy(connect(), verbose=verbose) as proxy:
+                    yield (proxy, helper)
 
 
 class Net:
