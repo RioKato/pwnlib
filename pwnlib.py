@@ -485,7 +485,7 @@ class Hexdump:
 
     @staticmethod
     def border(char: str) -> str:
-        return char * 57
+        return char * 56
 
 
 class Socket(Protocol):
