@@ -7,7 +7,7 @@ from multiprocessing import Process
 
 __all__ = [
     'Alias', 'Target', 'GdbServer', 'RR', 'Tmux', 'Display',
-    'Setup', 'Net',
+    'setup', 'Net',
     'p8', 'p16', 'p32', 'p64', 'pf', 'pd',
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
     'block',
@@ -712,55 +712,46 @@ class Proxy(Process, AbstractContextManager):
                 self.sendline(data)
 
 
-class Setup(AbstractContextManager):
-    from socket import socket
+@contextmanager
+def setup(command: Command | None, connect: Callable[[], Socket] | None, debug: bool, *,
+          env: dict[str, str] = {}, aslr: bool = True, verbose: int = 1) -> Iterator[tuple[Proxy, Callable[[], None]]]:
+    from socket import socketpair
 
-    def __init__(self, command: Command | None, connect: Callable[[], Socket] | None, debug: bool, *,
-                 env: dict[str, str] = {}, aslr: bool = True, verbose: int = 1):
-        from contextlib import ExitStack
-        from socket import socketpair
+    if connect:
+        if command:
+            if debug:
+                with Launcher.debug(command, env=env, aslr=aslr, redirect=None) as helper:
+                    socket = connect()
 
-        assert (command or connect)
-        estack = ExitStack()
-
-        try:
-            helper = lambda: None
-
-            if connect:
-                socket, redirect = None, None
+                    with Proxy(socket, verbose=verbose) as proxy:
+                        yield (proxy, helper)
             else:
-                socket, redirect = socketpair()
+                with Launcher.run(command, env=env, aslr=aslr, redirect=None) as helper:
+                    socket = connect()
 
-            if command:
-                try:
-                    if debug:
-                        context = Launcher.debug(command, env=env, aslr=aslr, redirect=redirect)
-                        helper = estack.enter_context(context)
-                    else:
-                        context = Launcher.run(command, env=env, aslr=aslr, redirect=redirect)
-                        helper = estack.enter_context(context)
-                finally:
-                    if redirect:
-                        redirect.close()
+                    with Proxy(socket, verbose=verbose) as proxy:
+                        yield (proxy, helper)
+        else:
+            socket = connect()
 
-            if connect:
-                socket = connect()
+            with Proxy(socket, verbose=verbose) as proxy:
+                yield (proxy, lambda: None)
 
-            assert (socket)
-            proxy = Proxy(socket, verbose=verbose)
-            estack.enter_context(proxy)
-            self.__estack: ExitStack = estack
-            self.proxy: Proxy = proxy
-            self.helper: Callable[[], None] = helper
-        except:
-            estack.close()
-            raise
+    else:
+        assert (command)
+        socket, redirect = socketpair()
 
-    def __enter__(self) -> tuple[Proxy, Callable[[], None]]:
-        return (self.proxy, self.helper)
+        with Proxy(socket, verbose=verbose) as proxy:
+            if debug:
+                with Launcher.debug(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                    redirect.close()
 
-    def __exit__(self, *args) -> bool | None:
-        return self.__estack.__exit__(*args)
+                    yield (proxy, helper)
+            else:
+                with Launcher.run(command, env=env, aslr=aslr, redirect=redirect) as helper:
+                    redirect.close()
+
+                    yield (proxy, helper)
 
 
 class Net:
