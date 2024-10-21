@@ -27,19 +27,19 @@ def popen(command: list[str], trace: bool,
 
 
 @contextmanager
-def pclose(p: Popen) -> Iterator[Popen]:
+def pclose(proc: Popen) -> Iterator[Popen]:
     from signal import Signals
 
-    with __pclose(p):
-        yield p
+    with __pclose(proc):
+        yield proc
 
-    code = p.returncode
+    code = proc.returncode
 
     if code >= 0:
-        reason = f'pid={p.pid}, code={code}'
+        reason = f'pid={proc.pid}, code={code}'
     else:
         signal = Signals(-code).name
-        reason = f'pid={p.pid}, signal={signal}'
+        reason = f'pid={proc.pid}, signal={signal}'
 
     message = f'process has terminated ({reason})'
     pprint(message)

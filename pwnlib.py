@@ -305,24 +305,24 @@ class Executor:
 
 
 @contextmanager
-def pclose(p: Popen) -> Iterator[Popen]:
+def pclose(proc: Popen) -> Iterator[Popen]:
     from subprocess import TimeoutExpired
     from signal import SIGTERM, SIGKILL
     from time import sleep
 
-    with p:
+    with proc:
         try:
-            yield p
+            yield proc
         finally:
-            if p.poll() is None:
-                p.terminate()
+            if proc.poll() is None:
+                proc.terminate()
 
                 try:
-                    p.wait(1)
+                    proc.wait(1)
                 except TimeoutExpired:
-                    p.kill()
+                    proc.kill()
 
-    if p.returncode not in [0, -SIGTERM, -SIGKILL]:
+    if proc.returncode not in [0, -SIGTERM, -SIGKILL]:
         sleep(0.5)
 
 
@@ -339,8 +339,8 @@ class Context:
 
     @contextmanager
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[int]:
-        with pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as p:
-            yield p.pid
+        with pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as proc:
+            yield proc.pid
 
     @contextmanager
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
