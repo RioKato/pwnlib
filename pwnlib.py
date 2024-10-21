@@ -6,7 +6,7 @@ from subprocess import Popen
 from multiprocessing import Process
 
 __all__ = [
-    'Alias', 'Target', 'GdbServer', 'RR', 'Tmux', 'Display',
+    'Alias', 'Target', 'GdbServer', 'RR', 'Tmux',
     'setup',
     'p8', 'p16', 'p32', 'p64', 'pf', 'pd',
     'u8', 'u16', 'u32', 'u64', 'uf', 'ud',
@@ -233,48 +233,6 @@ class Tmux(Outer):
         return command
 
 
-@dataclass
-class Display(Outer):
-    @staticmethod
-    def __display(command: list[str]):
-        from sys import stderr
-        from shlex import join
-
-        message = join(command)
-        message = f'{Color.RED}[DEBUG]{Color.END} {message}'
-        print(message, file=stderr, flush=True)
-
-    def run(self, env: dict[str, str], aslr: bool) -> list[str]:
-        command = self.command.run(env, aslr)
-        self.__display(command)
-        return command
-
-    def debug(self, env: dict[str, str], aslr: bool) -> list[str]:
-        command = self.command.debug(env, aslr)
-        self.__display(command)
-        return command
-
-    def attach(self, pid: int) -> list[str]:
-        command = self.command.attach(pid)
-        self.__display(command)
-        return command
-
-    def record(self, env: dict[str, str], aslr: bool) -> list[str]:
-        command = self.command.record(env, aslr)
-        self.__display(command)
-        return command
-
-    def replay(self) -> list[str]:
-        command = self.command.replay()
-        self.__display(command)
-        return command
-
-    def cli(self) -> list[str]:
-        command = self.command.cli()
-        self.__display(command)
-        return command
-
-
 class Glibc:
     from ctypes import CDLL, c_int, c_ulong
 
@@ -347,24 +305,24 @@ class Executor:
 
 
 @contextmanager
-def pclose(popen: Popen) -> Iterator[Popen]:
+def pclose(p: Popen) -> Iterator[Popen]:
     from subprocess import TimeoutExpired
     from signal import SIGTERM, SIGKILL
     from time import sleep
 
-    with popen:
+    with p:
         try:
-            yield popen
+            yield p
         finally:
-            if popen.poll() is None:
-                popen.terminate()
+            if p.poll() is None:
+                p.terminate()
 
                 try:
-                    popen.wait(1)
+                    p.wait(1)
                 except TimeoutExpired:
-                    popen.kill()
+                    p.kill()
 
-    if popen.returncode not in [0, -SIGTERM, -SIGKILL]:
+    if p.returncode not in [0, -SIGTERM, -SIGKILL]:
         sleep(0.5)
 
 
@@ -381,8 +339,8 @@ class Context:
 
     @contextmanager
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[int]:
-        with pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as popen:
-            yield popen.pid
+        with pclose(self.executor.run(env=env, aslr=aslr, redirect=redirect)) as p:
+            yield p.pid
 
     @contextmanager
     def debug(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[None]:
