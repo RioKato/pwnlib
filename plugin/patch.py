@@ -10,6 +10,7 @@ __pclose = pwnlib.pclose
 
 def pprint(message: str):
     from sys import stderr
+
     message = f'{pwnlib.Color.RED}[DEBUG]{pwnlib.Color.END} {message}'
     print(message, file=stderr, flush=True)
 
@@ -26,19 +27,19 @@ def popen(command: list[str], trace: bool,
 
 
 @contextmanager
-def pclose(popen: Popen) -> Iterator[Popen]:
+def pclose(p: Popen) -> Iterator[Popen]:
     from signal import Signals
 
-    with __pclose(popen):
-        yield popen
+    with __pclose(p):
+        yield p
 
-    code = popen.returncode
+    code = p.returncode
 
     if code >= 0:
-        reason = f'pid={popen.pid}, code={code}'
+        reason = f'pid={p.pid}, code={code}'
     else:
         signal = Signals(-code).name
-        reason = f'pid={popen.pid}, signal={signal}'
+        reason = f'pid={p.pid}, signal={signal}'
 
     message = f'process has terminated ({reason})'
     pprint(message)
