@@ -288,7 +288,7 @@ class Tmux:
         tmux: str = 'tmux'
 
         def debug(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
-            return self.debug(env=env, aslr=aslr)
+            return self.command.debug(env=env, aslr=aslr)
 
         def open(self) -> list[str]:
             command = [self.tmux, 'split']
@@ -303,7 +303,7 @@ class Tmux:
         tmux: str = 'tmux'
 
         def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
-            return self.prepare(env=env, aslr=aslr)
+            return self.command.prepare(env=env, aslr=aslr)
 
         def debug(self) -> list[str]:
             command = [self.tmux, 'split']
@@ -317,8 +317,11 @@ class Tmux:
         options: list[str] = field(default_factory=list)
         tmux: str = 'tmux'
 
+        def run(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.command.run(env=env, aslr=aslr)
+
         def attach(self, pid: int) -> list[str]:
-            return self.attach(pid)
+            return self.command.attach(pid)
 
         def open(self) -> list[str]:
             command = [self.tmux, 'split']
@@ -332,8 +335,11 @@ class Tmux:
         options: list[str] = field(default_factory=list)
         tmux: str = 'tmux'
 
+        def run(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.command.run(env=env, aslr=aslr)
+
         def prepare(self) -> list[str]:
-            return self.prepare()
+            return self.command.prepare()
 
         def attach(self, pid: int) -> list[str]:
             command = [self.tmux, 'split']
