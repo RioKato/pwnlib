@@ -169,7 +169,7 @@ class ReverseDebugger(Command):
 
 
 @dataclass
-class _Target:
+class Target(Runner):
     command: list[str]
     env: str = 'env'
     setarch: str = 'setarch'
@@ -190,12 +190,9 @@ class _Target:
         return command
 
 
-class Target(_Target, Runner):
-    pass
-
-
 @dataclass
-class _Gdb(_Target):
+class _Gdb:
+    command: list[str]
     host: str = ''
     port: int = 1234
     file: str = ''
@@ -247,7 +244,7 @@ class Gdb:
 
             command += self.options
             command += [f'{self.host}:{self.port}']
-            command += self.run(env={}, aslr=True)
+            command += self.command
             return command
 
     @dataclass
@@ -276,7 +273,7 @@ class RR(_Gdb, ReverseDebugger):
             command += ['-v', f'{k}={v}']
 
         command += self.options
-        command += self.run(env={}, aslr=True)
+        command += self.command
         return command
 
     def replay(self) -> list[str]:
