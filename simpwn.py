@@ -191,7 +191,7 @@ class Target(Runner):
 
 
 @dataclass
-class __GdbOpener:
+class _GdbOpener:
     command: Runner
     host: str = ''
     port: int = 1234
@@ -221,7 +221,7 @@ class __GdbOpener:
 
 class Gdb:
     @dataclass
-    class Debugger(__GdbOpener, Debugger):
+    class Debugger(_GdbOpener, Debugger):
         options: list[str] = field(default_factory=list)
         gdbserver: str = 'gdbserver'
         env: str = 'env'
@@ -248,7 +248,7 @@ class Gdb:
             return command
 
     @dataclass
-    class Attacher(__GdbOpener, Attacher):
+    class Attacher(_GdbOpener, Attacher):
         gdbserver: str = 'gdbserver'
 
         def attach(self, pid: int) -> list[str]:
@@ -256,7 +256,7 @@ class Gdb:
 
 
 @dataclass
-class RR(__GdbOpener, ReverseDebugger):
+class RR(_GdbOpener, ReverseDebugger):
     options: list[str] = field(default_factory=list)
     rr: str = 'rr'
     setarch: str = 'setarch'
