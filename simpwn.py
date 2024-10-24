@@ -278,3 +278,83 @@ class RR(__GdbOpener, ReverseDebugger):
 
     def replay(self) -> list[str]:
         return [self.rr, 'replay', '-s', f'{self.port}']
+
+
+class Tmux:
+    @dataclass
+    class Debugger(Debugger):
+        command: Debugger
+        options: list[str] = field(default_factory=list)
+        tmux: str = 'tmux'
+
+        def debug(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.debug(env=env, aslr=aslr)
+
+        def open(self) -> list[str]:
+            command = [self.tmux, 'split']
+            command += self.options
+            command += self.command.open()
+            return command
+
+    @dataclass
+    class MultiDebugger(MultiDebugger):
+        command: MultiDebugger
+        options: list[str] = field(default_factory=list)
+        tmux: str = 'tmux'
+
+        def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.prepare(env=env, aslr=aslr)
+
+        def open(self) -> list[str]:
+            command = [self.tmux, 'split']
+            command += self.options
+            command += self.command.open()
+            return command
+
+    @dataclass
+    class Attacher(Attacher):
+        command: Attacher
+        options: list[str] = field(default_factory=list)
+        tmux: str = 'tmux'
+
+        def attach(self, pid: int) -> list[str]:
+            return self.attach(pid)
+
+        def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.prepare(env=env, aslr=aslr)
+
+        def open(self) -> list[str]:
+            command = [self.tmux, 'split']
+            command += self.options
+            command += self.command.open()
+            return command
+
+    @dataclass
+    class MultiAttacher(MultiAttacher):
+        command: MultiAttacher
+        options: list[str] = field(default_factory=list)
+        tmux: str = 'tmux'
+
+        def open(self, pid: int) -> list[str]:
+            command = [self.tmux, 'split']
+            command += self.options
+            command += self.command.open(pid)
+            return command
+
+    @dataclass
+    class ReverseDebugger(Command):
+        command: ReverseDebugger
+        options: list[str] = field(default_factory=list)
+        tmux: str = 'tmux'
+
+        def record(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+            return self.command.record(env=env, aslr=aslr)
+
+        def replay(self) -> list[str]:
+            return self.command.replay()
+
+        def open(self) -> list[str]:
+            command = [self.tmux, 'split']
+            command += self.options
+            command += self.command.open()
+            return command
