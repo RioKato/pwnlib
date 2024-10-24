@@ -169,7 +169,7 @@ class ReverseDebugger(Command):
 
 
 @dataclass
-class Target(Runner):
+class _Target:
     command: list[str]
     env: str = 'env'
     setarch: str = 'setarch'
@@ -190,9 +190,12 @@ class Target(Runner):
         return command
 
 
+class Target(_Target, Runner):
+    pass
+
+
 @dataclass
-class _GdbOpener:
-    command: Runner
+class _Gdb(_Target):
     host: str = ''
     port: int = 1234
     file: str = ''
@@ -221,7 +224,7 @@ class _GdbOpener:
 
 class Gdb:
     @dataclass
-    class Debugger(_GdbOpener, Debugger):
+    class Debugger(_Gdb, Debugger):
         options: list[str] = field(default_factory=list)
         gdbserver: str = 'gdbserver'
         env: str = 'env'
@@ -244,11 +247,11 @@ class Gdb:
 
             command += self.options
             command += [f'{self.host}:{self.port}']
-            command += self.command.run(env={}, aslr=True)
+            command += self.run(env={}, aslr=True)
             return command
 
     @dataclass
-    class Attacher(_GdbOpener, Attacher):
+    class Attacher(_Gdb, Attacher):
         gdbserver: str = 'gdbserver'
 
         def attach(self, pid: int) -> list[str]:
@@ -256,7 +259,7 @@ class Gdb:
 
 
 @dataclass
-class RR(_GdbOpener, ReverseDebugger):
+class RR(_Gdb, ReverseDebugger):
     options: list[str] = field(default_factory=list)
     rr: str = 'rr'
     setarch: str = 'setarch'
@@ -273,7 +276,7 @@ class RR(_GdbOpener, ReverseDebugger):
             command += ['-v', f'{k}={v}']
 
         command += self.options
-        command += self.command.run(env={}, aslr=True)
+        command += self.run(env={}, aslr=True)
         return command
 
     def replay(self) -> list[str]:
