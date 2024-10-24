@@ -51,7 +51,7 @@ class Command(metaclass=ABCMeta):
         ...
 
 
-class Target(Command):
+class Runner(Command):
     @abstractmethod
     def run(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
         ...
@@ -84,17 +84,17 @@ class MultiDebugger(Command):
         ...
 
     @abstractmethod
-    def open(self) -> list[str]:
+    def debug(self) -> list[str]:
         ...
 
     @contextmanager
     def launch(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[Callable[[], None]]:
         with popen(self.prepare(env=env, aslr=aslr), False, redirect, False):
-            with popen(self.open(), False, redirect, True):
+            with popen(self.debug(), False, redirect, True):
                 yield lambda: None
 
 
-class Attacher(Target):
+class Attacher(Runner):
     @abstractmethod
     def attach(self, pid: int) -> list[str]:
         ...
@@ -114,13 +114,13 @@ class Attacher(Target):
                 yield attach
 
 
-class MultiAttacher(Target):
+class MultiAttacher(Runner):
     @abstractmethod
     def prepare(self) -> list[str]:
         ...
 
     @abstractmethod
-    def open(self, pid: int) -> list[str]:
+    def attach(self, pid: int) -> list[str]:
         ...
 
     @contextmanager
@@ -129,7 +129,7 @@ class MultiAttacher(Target):
             with popen(self.run(env=env, aslr=aslr), True, redirect, False) as pid:
                 with ExitStack() as estack:
                     def attach():
-                        estack.enter_context(popen(self.open(pid), False, None, True))
+                        estack.enter_context(popen(self.attach(pid), False, None, True))
 
                     yield attach
 
@@ -169,7 +169,7 @@ class ReverseDebugger(Command):
 
 
 @dataclass
-class Run(Target):
+class Target(Runner):
     command: list[str]
     env: str = 'env'
     setarch: str = 'setarch'
@@ -192,7 +192,7 @@ class Run(Target):
 
 @dataclass
 class __GdbOpener:
-    command: Target
+    command: Runner
     host: str = ''
     port: int = 1234
     file: str = ''
@@ -305,10 +305,10 @@ class Tmux:
         def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
             return self.prepare(env=env, aslr=aslr)
 
-        def open(self) -> list[str]:
+        def debug(self) -> list[str]:
             command = [self.tmux, 'split']
             command += self.options
-            command += self.command.open()
+            command += self.command.debug()
             return command
 
     @dataclass
@@ -335,10 +335,13 @@ class Tmux:
         options: list[str] = field(default_factory=list)
         tmux: str = 'tmux'
 
-        def open(self, pid: int) -> list[str]:
+        def prepare(self) -> list[str]:
+            return self.prepare()
+
+        def attach(self, pid: int) -> list[str]:
             command = [self.tmux, 'split']
             command += self.options
-            command += self.command.open(pid)
+            command += self.command.attach(pid)
             return command
 
     @dataclass
