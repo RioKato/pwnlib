@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from contextlib import ExitStack, contextmanager, suppress
+from dataclasses import dataclass, field
 from socket import socket
 from typing import IO, Callable, Iterator, cast
 
@@ -165,3 +166,115 @@ class ReverseDebugger(Command):
             with popen(self.replay(), False, None, False):
                 with popen(self.open(), False, None, True):
                     sigwait([SIGINT])
+
+
+@dataclass
+class Run(Target):
+    command: list[str]
+    env: str = 'env'
+    setarch: str = 'setarch'
+
+    def run(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+        command = []
+
+        if not aslr:
+            command += [self.setarch, '-R']
+
+        if env:
+            command += [self.env]
+
+            for k, v in env.items():
+                command += [f'{k}={v}']
+
+        command += self.command
+        return command
+
+
+@dataclass
+class GdbOpener:
+    command: Target
+    host: str = ''
+    port: int = 1234
+    file: str = ''
+    sysroot: str = ''
+    startup: str = 'target remote {host}:{port}'
+    script: str = ''
+    gdb: str = 'gdb'
+
+    def open(self) -> list[str]:
+        command = [self.gdb]
+
+        if self.sysroot:
+            command += ['-ex', f'set sysroot {self.sysroot}']
+
+        startup = self.startup.format(host=self.host, port=self.port)
+        command += ['-ex', startup]
+
+        if self.script:
+            command += ['-x', self.script]
+
+        if self.file:
+            command += [self.file]
+
+        return command
+
+
+@dataclass
+class GdbDebugger(GdbOpener, Debugger):
+    options: list[str] = field(default_factory=list)
+    gdbserver: str = 'gdbserver'
+    env: str = 'env'
+
+    def debug(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+        command = [self.gdbserver]
+
+        if aslr:
+            command += ['--no-disable-randomization']
+        else:
+            command += ['--disable-randomization']
+
+        if env:
+            command += ['--wrapper', self.env]
+
+            for k, v in env.items():
+                command += [f'{k}={v}']
+
+            command += ['--']
+
+        command += self.options
+        command += [f'{self.host}:{self.port}']
+        command += self.command.run(env={}, aslr=True)
+        return command
+
+
+@dataclass
+class GdbAttacher(GdbOpener, Attacher):
+    gdbserver: str = 'gdbserver'
+
+    def attach(self, pid: int) -> list[str]:
+        return [self.gdbserver, '--attach', f'{self.host}:{self.port}', f'{pid}']
+
+
+@dataclass
+class RR(GdbOpener, ReverseDebugger):
+    options: list[str] = field(default_factory=list)
+    rr: str = 'rr'
+    setarch: str = 'setarch'
+
+    def record(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+        command = []
+
+        if not aslr:
+            command += [self.setarch, '-R']
+
+        command += [self.rr, 'record']
+
+        for k, v in env.items():
+            command += ['-v', f'{k}={v}']
+
+        command += self.options
+        command += self.command.run(env={}, aslr=True)
+        return command
+
+    def replay(self) -> list[str]:
+        return [self.rr, 'replay', '-s', f'{self.port}']
