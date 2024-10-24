@@ -79,7 +79,7 @@ class Debugger(Command):
 
 class MultiDebugger(Command):
     @abstractmethod
-    def setup(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
+    def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
         ...
 
     @abstractmethod
@@ -88,7 +88,7 @@ class MultiDebugger(Command):
 
     @contextmanager
     def launch(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[Callable[[], None]]:
-        with popen(self.setup(env=env, aslr=aslr), False, redirect, False):
+        with popen(self.prepare(env=env, aslr=aslr), False, redirect, False):
             with popen(self.open(), False, redirect, True):
                 yield lambda: None
 
@@ -115,7 +115,7 @@ class Attacher(Target):
 
 class MultiAttacher(Target):
     @abstractmethod
-    def setup(self) -> list[str]:
+    def prepare(self) -> list[str]:
         ...
 
     @abstractmethod
@@ -124,7 +124,7 @@ class MultiAttacher(Target):
 
     @contextmanager
     def launch(self, *, env: dict[str, str] = {}, aslr: bool = True, redirect: socket | None = None) -> Iterator[Callable[[], None]]:
-        with popen(self.setup(), False, None, False):
+        with popen(self.prepare(), False, None, False):
             with popen(self.run(env=env, aslr=aslr), True, redirect, False) as pid:
                 with ExitStack() as estack:
                     def attach():
