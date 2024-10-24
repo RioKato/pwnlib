@@ -320,9 +320,6 @@ class Tmux:
         def attach(self, pid: int) -> list[str]:
             return self.attach(pid)
 
-        def prepare(self, *, env: dict[str, str] = {}, aslr: bool = True) -> list[str]:
-            return self.prepare(env=env, aslr=aslr)
-
         def open(self) -> list[str]:
             command = [self.tmux, 'split']
             command += self.options
@@ -345,7 +342,7 @@ class Tmux:
             return command
 
     @dataclass
-    class ReverseDebugger(Command):
+    class ReverseDebugger(ReverseDebugger):
         command: ReverseDebugger
         options: list[str] = field(default_factory=list)
         tmux: str = 'tmux'
